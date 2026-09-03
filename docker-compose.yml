@@ -1,0 +1,50 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: clipper-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: clipper_user
+      POSTGRES_PASSWORD: clipper_secret
+      POSTGRES_DB: clipper_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./schema.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U clipper_user -d clipper_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  clipper:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: stream-clipper
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"
+      - "8765:8765"
+    volumes:
+      - ./storage:/app/storage
+      - /dev/shm:/dev/shm
+    # Uncomment deploy section for NVIDIA GPU passthrough on Linux
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu, video]
+
+volumes:
+  pgdata:

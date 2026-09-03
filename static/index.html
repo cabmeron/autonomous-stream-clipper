@@ -1,0 +1,653 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Autonomous Stream Clipper HUD</title>
+  <script src="https://player.twitch.tv/js/v3/index.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #07090e;
+      color: #f3f4f6;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace;
+      overflow: hidden;
+    }
+    #viewport {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+    }
+
+    /* Top Control Bar */
+    #top-bar {
+      position: absolute;
+      top: 16px;
+      left: 20px;
+      height: 52px;
+      background: rgba(13, 16, 23, 0.94);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      backdrop-filter: blur(14px);
+      border-radius: 12px;
+      padding: 8px 16px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      z-index: 110;
+      box-shadow: 0 12px 30px rgba(0, 0, 0, 0.6);
+    }
+    .brand-tag {
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0.6px;
+      color: #38bdf8;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .brand-tag::after {
+      content: "";
+      display: inline-block;
+      width: 1px;
+      height: 18px;
+      background: rgba(255, 255, 255, 0.15);
+      margin-left: 6px;
+    }
+    .channel-input-group {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .channel-input-group input {
+      background: rgba(0, 0, 0, 0.45);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 6px;
+      color: #fff;
+      font-size: 12px;
+      font-family: inherit;
+      padding: 6px 12px;
+      width: 180px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .channel-input-group input:focus {
+      border-color: #38bdf8;
+    }
+    .btn-action {
+      background: #38bdf8;
+      color: #080a10;
+      border: none;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 7px 14px;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .btn-action:hover { background: #7dd3fc; }
+    .btn-clear {
+      background: rgba(239, 68, 68, 0.15);
+      color: #ef4444;
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      font-size: 11px;
+      font-weight: 700;
+      padding: 6px 12px;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    .btn-clear:hover { background: rgba(239, 68, 68, 0.25); }
+
+    .status-pill {
+      font-size: 10px;
+      font-weight: 800;
+      text-transform: uppercase;
+      padding: 4px 10px;
+      border-radius: 20px;
+      letter-spacing: 0.5px;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .status-pill-idle { background: #1a202c; color: #94a3b8; border: 1px solid rgba(255, 255, 255, 0.08); }
+    .status-pill-live { background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); }
+
+    /* Empty state screen when no channel is active */
+    #empty-state {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: radial-gradient(circle at center, #111624 0%, #07090e 70%);
+      color: #94a3b8;
+      text-align: center;
+      padding: 20px;
+      z-index: 10;
+    }
+    .empty-icon {
+      font-size: 48px;
+      margin-bottom: 16px;
+      filter: drop-shadow(0 0 20px rgba(56, 189, 248, 0.4));
+    }
+    .empty-title {
+      font-size: 20px;
+      font-weight: 700;
+      color: #e2e8f0;
+      margin-bottom: 8px;
+    }
+    .empty-desc {
+      font-size: 13px;
+      max-width: 440px;
+      line-height: 1.5;
+      color: #64748b;
+    }
+
+    #twitch-frame {
+      width: 100%;
+      height: 100%;
+      display: none;
+    }
+    #twitch-frame.active {
+      display: block;
+    }
+
+    /* Right Telemetry Card */
+    #hud-card {
+      position: absolute;
+      top: 16px;
+      right: 20px;
+      width: 340px;
+      background: rgba(13, 16, 23, 0.92);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      backdrop-filter: blur(14px);
+      border-radius: 14px;
+      padding: 18px;
+      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.7);
+      z-index: 100;
+    }
+    .hud-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      padding-bottom: 8px;
+    }
+    .hud-title {
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0.8px;
+      color: #e2e8f0;
+    }
+    .badge {
+      font-size: 10px;
+      font-weight: 800;
+      text-transform: uppercase;
+      padding: 3px 8px;
+      border-radius: 6px;
+      letter-spacing: 0.5px;
+    }
+    .badge-idle { background: #1a202c; color: #94a3b8; border: 1px solid rgba(255, 255, 255, 0.06); }
+    .badge-spike { background: #ef4444; color: #fff; animation: pulse 0.8s infinite; box-shadow: 0 0 12px rgba(239, 68, 68, 0.6); }
+    @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.45; } 100% { opacity: 1; } }
+
+    .section-title {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: #64748b;
+      margin-top: 10px;
+      margin-bottom: 4px;
+    }
+    .metric-row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 13px;
+      margin-top: 5px;
+    }
+    .metric-label { color: #94a3b8; }
+    .metric-val { font-family: "SFMono-Regular", Consolas, Menlo, monospace; font-weight: 600; }
+
+    canvas {
+      width: 100%;
+      height: 55px;
+      margin-top: 10px;
+      background: rgba(0, 0, 0, 0.4);
+      border-radius: 8px;
+      border: 1px solid rgba(255, 255, 255, 0.06);
+    }
+
+    /* Bottom Triage Drawer */
+    #gallery-bar {
+      position: absolute;
+      bottom: 20px;
+      left: 20px;
+      right: 20px;
+      height: 120px;
+      background: rgba(13, 16, 23, 0.94);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      backdrop-filter: blur(14px);
+      border-radius: 14px;
+      padding: 12px 16px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      overflow-x: auto;
+      z-index: 100;
+      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.7);
+    }
+    .gallery-title {
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.6px;
+      color: #94a3b8;
+      writing-mode: vertical-rl;
+      transform: rotate(180deg);
+      text-align: center;
+      padding-right: 4px;
+      border-right: 1px solid rgba(255, 255, 255, 0.1);
+      height: 100%;
+    }
+    .clip-card {
+      flex: 0 0 220px;
+      height: 94px;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 8px;
+      padding: 8px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+    .clip-card:hover {
+      background: rgba(56, 189, 248, 0.1);
+      border-color: rgba(56, 189, 248, 0.4);
+      transform: translateY(-2px);
+    }
+    .clip-card-header {
+      font-size: 11px;
+      font-weight: 700;
+      color: #f1f5f9;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .clip-card-meta {
+      display: flex;
+      justify-content: space-between;
+      font-size: 10px;
+      color: #94a3b8;
+    }
+    .clip-actions {
+      display: flex;
+      gap: 6px;
+      margin-top: 4px;
+    }
+    .btn {
+      font-size: 10px;
+      font-weight: 700;
+      padding: 3px 8px;
+      border-radius: 4px;
+      border: none;
+      cursor: pointer;
+    }
+    .btn-approve { background: #10b981; color: #fff; }
+    .btn-reject { background: #ef4444; color: #fff; }
+    .btn-play { background: #38bdf8; color: #090a0f; }
+
+    /* Modal Player */
+    #modal {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.85);
+      backdrop-filter: blur(8px);
+      z-index: 200;
+      align-items: center;
+      justify-content: center;
+    }
+    #modal.active { display: flex; }
+    .modal-content {
+      position: relative;
+      width: 380px;
+      height: 675px;
+      background: #000;
+      border-radius: 16px;
+      overflow: hidden;
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.9);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+    }
+    .modal-content video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    .close-btn {
+      position: absolute;
+      top: 14px;
+      right: 14px;
+      background: rgba(0, 0, 0, 0.6);
+      color: #fff;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      cursor: pointer;
+      font-size: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 10;
+    }
+  </style>
+</head>
+<body>
+  <div id="viewport">
+    <!-- Top Control Bar -->
+    <div id="top-bar">
+      <div class="brand-tag">⚡ CLIPPER</div>
+      <div class="channel-input-group">
+        <input id="channel-input" type="text" placeholder="Enter channel (e.g. zarbex)" onkeydown="if(event.key==='Enter') applyChannel();" />
+        <button class="btn-action" onclick="applyChannel()">Connect</button>
+        <button class="btn-clear" onclick="clearChannel()">Stop</button>
+      </div>
+      <div id="channel-status-pill" class="status-pill status-pill-idle">● IDLE (NO CHANNEL)</div>
+    </div>
+
+    <!-- Empty State -->
+    <div id="empty-state">
+      <div class="empty-icon">📺</div>
+      <div class="empty-title">Awaiting Twitch Channel</div>
+      <div class="empty-desc">
+        Enter a Twitch streamer name in the top bar (e.g. <b>zarbex</b>, <b>shroud</b>, or <b>test</b>) and click <b>Connect</b> to start live ingestion, velocity tracking, and automated clipping.
+      </div>
+    </div>
+
+    <!-- Twitch Player Frame -->
+    <div id="twitch-frame"></div>
+
+    <!-- HUD Metrics Card -->
+    <div id="hud-card">
+      <div class="hud-header">
+        <span id="hud-channel-title" class="hud-title">STREAM HEURISTICS</span>
+        <span id="badge" class="badge badge-idle">STANDBY</span>
+      </div>
+
+      <div class="section-title">Chat IRC Velocity</div>
+      <div class="metric-row">
+        <span class="metric-label">Instant (5s)</span>
+        <span id="instant-rate" class="metric-val" style="color: #38bdf8;">0.00 msg/s</span>
+      </div>
+      <div class="metric-row">
+        <span class="metric-label">Baseline (60s)</span>
+        <span id="baseline-rate" class="metric-val" style="color: #94a3b8;">0.00 msg/s</span>
+      </div>
+      <div class="metric-row">
+        <span class="metric-label">Spike Ratio</span>
+        <span id="spike-ratio" class="metric-val" style="color: #4ade80;">1.00x</span>
+      </div>
+
+      <canvas id="graph" width="300" height="55"></canvas>
+
+      <div class="section-title">Audio & OCR Telemetry</div>
+      <div class="metric-row">
+        <span class="metric-label">Audio Level (RMS)</span>
+        <span id="audio-rms" class="metric-val" style="color: #fbbf24;">-60.0 dB</span>
+      </div>
+      <div class="metric-row">
+        <span class="metric-label">OCR Multiplier</span>
+        <span id="ocr-multiplier" class="metric-val" style="color: #a78bfa;">1.0x</span>
+      </div>
+      <div class="metric-row">
+        <span class="metric-label">OCR Balance</span>
+        <span id="ocr-balance" class="metric-val" style="color: #34d399;">$0.00</span>
+      </div>
+    </div>
+
+    <!-- Bottom Triage Gallery -->
+    <div id="gallery-bar">
+      <div class="gallery-title">LOCAL CLIPS</div>
+      <div id="clip-container" style="display: flex; gap: 12px; align-items: center;">
+        <span style="font-size: 11px; color: #64748b;">No clips captured yet.</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Video Modal -->
+  <div id="modal">
+    <div class="modal-content">
+      <button class="close-btn" onclick="closeModal()">✕</button>
+      <video id="preview-player" controls autoplay loop playsinline></video>
+    </div>
+  </div>
+
+  <script>
+    let activeChannel = null;
+    let twitchPlayer = null;
+
+    const canvas = document.getElementById("graph");
+    const ctx = canvas.getContext("2d");
+    const history = new Array(50).fill(0);
+
+    function drawChart() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.strokeStyle = "#38bdf8";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      const maxVal = Math.max(20, ...history);
+      for (let i = 0; i < history.length; i++) {
+        const x = (i / (history.length - 1)) * canvas.width;
+        const y = canvas.height - (history[i] / maxVal) * (canvas.height - 10) - 5;
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+
+      ctx.lineTo(canvas.width, canvas.height);
+      ctx.lineTo(0, canvas.height);
+      ctx.fillStyle = "rgba(56, 189, 248, 0.08)";
+      ctx.fill();
+    }
+
+    function updateChannelUI(channel) {
+      activeChannel = channel;
+      const statusPill = document.getElementById("channel-status-pill");
+      const title = document.getElementById("hud-channel-title");
+      const emptyState = document.getElementById("empty-state");
+      const frame = document.getElementById("twitch-frame");
+
+      if (channel) {
+        statusPill.className = "status-pill status-pill-live";
+        statusPill.innerHTML = `● LIVE: #${channel}`;
+        title.innerText = `#${channel.toUpperCase()}`;
+        emptyState.style.display = "none";
+        frame.classList.add("active");
+
+        // Embed or update Twitch Player
+        if (twitchPlayer) {
+          try { twitchPlayer.setChannel(channel); } catch (e) { createTwitchPlayer(channel); }
+        } else {
+          createTwitchPlayer(channel);
+        }
+      } else {
+        statusPill.className = "status-pill status-pill-idle";
+        statusPill.innerHTML = `● IDLE (NO CHANNEL)`;
+        title.innerText = "STREAM HEURISTICS";
+        emptyState.style.display = "flex";
+        frame.classList.remove("active");
+        if (twitchPlayer) {
+          try { twitchPlayer.pause(); } catch (e) {}
+        }
+      }
+    }
+
+    function createTwitchPlayer(channel) {
+      const frame = document.getElementById("twitch-frame");
+      frame.innerHTML = "";
+      try {
+        twitchPlayer = new Twitch.Player("twitch-frame", {
+          width: "100%",
+          height: "100%",
+          channel: channel,
+          parent: [window.location.hostname || "localhost", "127.0.0.1"]
+        });
+      } catch (err) {
+        console.warn("Twitch embed not available:", err);
+      }
+    }
+
+    async function applyChannel() {
+      const input = document.getElementById("channel-input");
+      const channel = input.value.trim().toLowerCase().replace("#", "");
+      if (!channel) return;
+
+      try {
+        const res = await fetch("/api/channel", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ channel })
+        });
+        const data = await res.json();
+        updateChannelUI(data.channel);
+        history.fill(0);
+        drawChart();
+      } catch (err) {
+        alert("Failed to connect channel: " + err);
+      }
+    }
+
+    async function clearChannel() {
+      try {
+        await fetch("/api/channel", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ channel: "" })
+        });
+        document.getElementById("channel-input").value = "";
+        updateChannelUI(null);
+        history.fill(0);
+        drawChart();
+      } catch (err) {
+        console.error("Failed to disconnect:", err);
+      }
+    }
+
+    // Connect to WebSocket Telemetry
+    const ws = new WebSocket(`ws://${window.location.hostname || "localhost"}:8765`);
+    ws.onmessage = (evt) => {
+      try {
+        const data = JSON.parse(evt.data);
+
+        // Sync channel if server updated
+        if (data.channel !== activeChannel && data.channel) {
+          document.getElementById("channel-input").value = data.channel;
+          updateChannelUI(data.channel);
+        } else if (!data.channel && activeChannel) {
+          updateChannelUI(null);
+        }
+
+        document.getElementById("instant-rate").innerText = `${data.v_instant.toFixed(2)} msg/s`;
+        document.getElementById("baseline-rate").innerText = `${data.v_baseline.toFixed(2)} msg/s`;
+        document.getElementById("spike-ratio").innerText = `${data.spike_ratio.toFixed(2)}x`;
+        document.getElementById("audio-rms").innerText = `${data.audio_rms_db.toFixed(1)} dB`;
+        document.getElementById("ocr-multiplier").innerText = data.ocr_multiplier || "1.0x";
+        document.getElementById("ocr-balance").innerText = data.ocr_balance || "$0.00";
+
+        const badge = document.getElementById("badge");
+        if (data.status === "idle") {
+          badge.className = "badge badge-idle";
+          badge.innerText = "STANDBY";
+        } else if (data.is_spiking || data.audio_spike) {
+          badge.className = "badge badge-spike";
+          badge.innerText = "TRIGGER SPIKE";
+        } else {
+          badge.className = "badge badge-idle";
+          badge.innerText = "MONITORING";
+        }
+
+        if (data.recent_clip) {
+          fetchRecentClips();
+        }
+
+        history.push(data.v_instant);
+        history.shift();
+        drawChart();
+      } catch (err) {
+        console.error("Telemetry error:", err);
+      }
+    };
+
+    // Fetch and render local clips gallery
+    async function fetchRecentClips() {
+      try {
+        const res = await fetch("/api/clips?limit=15");
+        if (!res.ok) return;
+        const clips = await res.json();
+        const container = document.getElementById("clip-container");
+        if (!clips || clips.length === 0) {
+          container.innerHTML = '<span style="font-size: 11px; color: #64748b;">No clips captured yet.</span>';
+          return;
+        }
+
+        container.innerHTML = clips.map(c => `
+          <div class="clip-card" onclick="openModal('${c.video_url}')">
+            <div class="clip-card-header">${c.suggested_title}</div>
+            <div class="clip-card-meta">
+              <span>⏱ ${c.duration_seconds}s</span>
+              <span style="color: #38bdf8; font-weight: 700;">★ ${c.heuristic_score}/10</span>
+              <span style="color: ${c.status === 'approved' ? '#10b981' : '#f59e0b'};">${c.status}</span>
+            </div>
+            <div class="clip-actions" onclick="event.stopPropagation();">
+              <button class="btn btn-play" onclick="openModal('${c.video_url}')">▶ Preview</button>
+              <button class="btn btn-approve" onclick="updateStatus('${c.id}', 'approved')">✓</button>
+              <button class="btn btn-reject" onclick="updateStatus('${c.id}', 'rejected')">✕</button>
+            </div>
+          </div>
+        `).join("");
+      } catch (err) {
+        console.error("Failed to load clips:", err);
+      }
+    }
+
+    async function updateStatus(clipId, status) {
+      try {
+        await fetch(`/api/clips/${clipId}/status`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status })
+        });
+        fetchRecentClips();
+      } catch (err) {
+        console.error("Status update error:", err);
+      }
+    }
+
+    function openModal(videoUrl) {
+      const modal = document.getElementById("modal");
+      const player = document.getElementById("preview-player");
+      player.src = videoUrl;
+      modal.classList.add("active");
+      player.play();
+    }
+
+    function closeModal() {
+      const modal = document.getElementById("modal");
+      const player = document.getElementById("preview-player");
+      player.pause();
+      player.src = "";
+      modal.classList.remove("active");
+    }
+
+    // Initial check on load
+    fetch("/api/channel")
+      .then(r => r.json())
+      .then(d => { if (d.channel) updateChannelUI(d.channel); else updateChannelUI(null); })
+      .catch(() => updateChannelUI(null));
+
+    fetchRecentClips();
+  </script>
+</body>
+</html>
