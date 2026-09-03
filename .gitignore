@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.DS_Store
+.env
+/storage/clips/clip_*.mp4
+/storage/clips/thumb_*.jpg
+/storage/clips/clip.mp4
+/storage/clips/test_*.ts

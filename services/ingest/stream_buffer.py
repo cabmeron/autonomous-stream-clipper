@@ -29,7 +29,6 @@ def resolve_streamlink_binary() -> str:
     if which_bin:
         return which_bin
 
-    # Fallback to invoking module through python
     return f'"{sys.executable}" -m streamlink'
 
 
@@ -50,7 +49,7 @@ class StreamRingBuffer:
         self.window_seconds = window_seconds
         self.segment_time = segment_time
         self.segment_wrap = max(1, self.window_seconds // self.segment_time)
-        self.simulate = simulate or (self.channel in ("test", "demo") or os.getenv("SIMULATE_STREAM", "false").lower() == "true")
+        self.simulate = simulate or (self.channel in ("test", "demo", "test1", "test2") or os.getenv("SIMULATE_STREAM", "false").lower() == "true")
 
         self.process: Optional[subprocess.Popen] = None
         self.running = False
@@ -70,7 +69,7 @@ class StreamRingBuffer:
         out_pattern = os.path.join(self.shm_dir, "seg_%02d.ts")
 
         if self.simulate:
-            logger.info("[Buffer] Running in STREAM SIMULATION mode (synthetic live stream)...")
+            logger.info("[Buffer:%s] Running in SIMULATION mode (synthetic stream)...", self.channel)
             cmd = (
                 f'ffmpeg -hide_banner -loglevel error '
                 f'-re -f lavfi -i "testsrc=size=1920x1080:rate=30" '
@@ -91,7 +90,7 @@ class StreamRingBuffer:
             )
 
         logger.info(
-            "[Buffer] Initializing ingest for %s -> %d segments (%ds total) at %s",
+            "[Buffer:%s] Initializing ingest -> %d segments (%ds total) at %s",
             self.channel,
             self.segment_wrap,
             self.window_seconds,
@@ -110,7 +109,7 @@ class StreamRingBuffer:
         while self.running:
             if not self.is_alive():
                 if self.running:
-                    logger.info("[Buffer] Streamer #%s is currently offline or stream disconnected. Retrying in 15s...", self.channel)
+                    logger.info("[Buffer:%s] Stream offline or disconnected. Retrying in 15s...", self.channel)
                     time.sleep(15)
                     if self.running:
                         self._start_ingest_process()
@@ -151,7 +150,7 @@ class StreamRingBuffer:
                     self.process.terminate()
                 self.process.wait(timeout=5)
             except Exception as e:
-                logger.debug("[Buffer] Error terminating process: %s", e)
+                logger.debug("[Buffer:%s] Error terminating process: %s", self.channel, e)
                 try:
                     self.process.kill()
                 except Exception:
@@ -159,4 +158,4 @@ class StreamRingBuffer:
             self.process = None
 
         shutil.rmtree(self.shm_dir, ignore_errors=True)
-        logger.info("[Buffer] Stopped and wiped buffer for %s", self.channel)
+        logger.info("[Buffer:%s] Stopped and wiped buffer", self.channel)

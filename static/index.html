@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Autonomous Stream Clipper HUD</title>
+  <title>Autonomous Stream Clipper - Multi-Session HUD</title>
   <script src="https://player.twitch.tv/js/v3/index.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -19,31 +19,40 @@
       height: 100vh;
     }
 
-    /* Top Control Bar */
+    /* Top Tab Bar */
     #top-bar {
       position: absolute;
-      top: 16px;
-      left: 20px;
+      top: 14px;
+      left: 18px;
+      right: 18px;
       height: 52px;
       background: rgba(13, 16, 23, 0.94);
       border: 1px solid rgba(255, 255, 255, 0.12);
       backdrop-filter: blur(14px);
       border-radius: 12px;
-      padding: 8px 16px;
+      padding: 6px 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      z-index: 120;
+      box-shadow: 0 12px 30px rgba(0, 0, 0, 0.6);
+    }
+    .top-left {
       display: flex;
       align-items: center;
       gap: 12px;
-      z-index: 110;
-      box-shadow: 0 12px 30px rgba(0, 0, 0, 0.6);
+      overflow-x: auto;
+      max-width: calc(100vw - 360px);
     }
     .brand-tag {
       font-size: 12px;
       font-weight: 800;
-      letter-spacing: 0.6px;
+      letter-spacing: 0.8px;
       color: #38bdf8;
       display: flex;
       align-items: center;
       gap: 6px;
+      flex-shrink: 0;
     }
     .brand-tag::after {
       content: "";
@@ -53,65 +62,101 @@
       background: rgba(255, 255, 255, 0.15);
       margin-left: 6px;
     }
-    .channel-input-group {
+
+    /* Tab Items */
+    #tab-strip {
       display: flex;
       align-items: center;
       gap: 8px;
     }
-    .channel-input-group input {
+    .tab-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 12px;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: 600;
+      color: #94a3b8;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      white-space: nowrap;
+      user-select: none;
+    }
+    .tab-item:hover {
+      background: rgba(255, 255, 255, 0.08);
+      color: #f1f5f9;
+    }
+    .tab-item.active {
+      background: rgba(56, 189, 248, 0.14);
+      border-color: rgba(56, 189, 248, 0.5);
+      color: #38bdf8;
+      font-weight: 700;
+      box-shadow: 0 0 14px rgba(56, 189, 248, 0.2);
+    }
+    .tab-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #10b981;
+    }
+    .tab-dot.spiking {
+      background: #ef4444;
+      animation: pulse 0.8s infinite;
+      box-shadow: 0 0 8px #ef4444;
+    }
+    .tab-close {
+      font-size: 11px;
+      color: #64748b;
+      margin-left: 2px;
+      border-radius: 4px;
+      padding: 1px 4px;
+      line-height: 1;
+    }
+    .tab-close:hover {
+      background: rgba(239, 68, 68, 0.3);
+      color: #fff;
+    }
+
+    /* Add Tab Group */
+    .add-group {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-shrink: 0;
+    }
+    .add-group input {
       background: rgba(0, 0, 0, 0.45);
       border: 1px solid rgba(255, 255, 255, 0.15);
       border-radius: 6px;
       color: #fff;
       font-size: 12px;
       font-family: inherit;
-      padding: 6px 12px;
-      width: 180px;
+      padding: 6px 10px;
+      width: 140px;
       outline: none;
-      transition: border-color 0.2s;
     }
-    .channel-input-group input:focus {
+    .add-group input:focus {
       border-color: #38bdf8;
     }
-    .btn-action {
+    .btn-add {
       background: #38bdf8;
       color: #080a10;
       border: none;
       font-size: 11px;
       font-weight: 700;
-      padding: 7px 14px;
-      border-radius: 6px;
-      cursor: pointer;
-      transition: background 0.15s;
-    }
-    .btn-action:hover { background: #7dd3fc; }
-    .btn-clear {
-      background: rgba(239, 68, 68, 0.15);
-      color: #ef4444;
-      border: 1px solid rgba(239, 68, 68, 0.3);
-      font-size: 11px;
-      font-weight: 700;
       padding: 6px 12px;
       border-radius: 6px;
       cursor: pointer;
-    }
-    .btn-clear:hover { background: rgba(239, 68, 68, 0.25); }
-
-    .status-pill {
-      font-size: 10px;
-      font-weight: 800;
-      text-transform: uppercase;
-      padding: 4px 10px;
-      border-radius: 20px;
-      letter-spacing: 0.5px;
       display: flex;
       align-items: center;
-      gap: 5px;
+      gap: 4px;
     }
-    .status-pill-idle { background: #1a202c; color: #94a3b8; border: 1px solid rgba(255, 255, 255, 0.08); }
-    .status-pill-live { background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); }
+    .btn-add:hover { background: #7dd3fc; }
 
-    /* Empty state screen when no channel is active */
+    /* Empty state screen */
     #empty-state {
       position: absolute;
       inset: 0;
@@ -126,9 +171,9 @@
       z-index: 10;
     }
     .empty-icon {
-      font-size: 48px;
+      font-size: 54px;
       margin-bottom: 16px;
-      filter: drop-shadow(0 0 20px rgba(56, 189, 248, 0.4));
+      filter: drop-shadow(0 0 24px rgba(56, 189, 248, 0.4));
     }
     .empty-title {
       font-size: 20px;
@@ -138,8 +183,8 @@
     }
     .empty-desc {
       font-size: 13px;
-      max-width: 440px;
-      line-height: 1.5;
+      max-width: 460px;
+      line-height: 1.6;
       color: #64748b;
     }
 
@@ -155,24 +200,28 @@
     /* Right Telemetry Card */
     #hud-card {
       position: absolute;
-      top: 16px;
-      right: 20px;
-      width: 340px;
-      background: rgba(13, 16, 23, 0.92);
+      top: 76px;
+      right: 18px;
+      width: 350px;
+      max-height: calc(100vh - 240px);
+      background: rgba(13, 16, 23, 0.94);
       border: 1px solid rgba(255, 255, 255, 0.12);
       backdrop-filter: blur(14px);
       border-radius: 14px;
-      padding: 18px;
-      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.7);
+      padding: 16px;
+      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.75);
       z-index: 100;
+      display: flex;
+      flex-direction: column;
+      overflow-y: auto;
     }
     .hud-header {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      margin-bottom: 12px;
+      margin-bottom: 8px;
       border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-      padding-bottom: 8px;
+      padding-bottom: 6px;
     }
     .hud-title {
       font-size: 12px;
@@ -194,64 +243,125 @@
 
     .section-title {
       font-size: 10px;
+      font-weight: 700;
       text-transform: uppercase;
       letter-spacing: 0.8px;
       color: #64748b;
-      margin-top: 10px;
+      margin-top: 8px;
       margin-bottom: 4px;
+      display: flex;
+      justify-content: space-between;
     }
     .metric-row {
       display: flex;
       justify-content: space-between;
-      font-size: 13px;
-      margin-top: 5px;
+      font-size: 12px;
+      margin-top: 3px;
     }
     .metric-label { color: #94a3b8; }
     .metric-val { font-family: "SFMono-Regular", Consolas, Menlo, monospace; font-weight: 600; }
 
     canvas {
       width: 100%;
-      height: 55px;
-      margin-top: 10px;
-      background: rgba(0, 0, 0, 0.4);
+      height: 46px;
+      margin-top: 6px;
+      background: rgba(0, 0, 0, 0.45);
       border-radius: 8px;
       border: 1px solid rgba(255, 255, 255, 0.06);
+      display: block;
+    }
+
+    /* Live Chat Box */
+    .chat-box {
+      margin-top: 6px;
+      height: 140px;
+      background: rgba(0, 0, 0, 0.45);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 8px;
+      padding: 8px 10px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      font-size: 11px;
+      scroll-behavior: smooth;
+    }
+    .chat-msg {
+      display: flex;
+      gap: 6px;
+      line-height: 1.35;
+      word-break: break-word;
+    }
+    .chat-user {
+      font-weight: 700;
+      flex-shrink: 0;
+    }
+    .chat-text {
+      color: #cbd5e1;
     }
 
     /* Bottom Triage Drawer */
     #gallery-bar {
       position: absolute;
-      bottom: 20px;
-      left: 20px;
-      right: 20px;
-      height: 120px;
+      bottom: 18px;
+      left: 18px;
+      right: 18px;
+      height: 140px;
       background: rgba(13, 16, 23, 0.94);
       border: 1px solid rgba(255, 255, 255, 0.12);
       backdrop-filter: blur(14px);
       border-radius: 14px;
-      padding: 12px 16px;
+      padding: 10px 16px;
       display: flex;
-      align-items: center;
-      gap: 14px;
-      overflow-x: auto;
+      flex-direction: column;
       z-index: 100;
       box-shadow: 0 16px 40px rgba(0, 0, 0, 0.7);
+    }
+    .gallery-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      padding-bottom: 6px;
+    }
+    .gallery-title-bar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
     }
     .gallery-title {
       font-size: 11px;
       font-weight: 800;
-      letter-spacing: 0.6px;
+      letter-spacing: 0.8px;
       color: #94a3b8;
-      writing-mode: vertical-rl;
-      transform: rotate(180deg);
-      text-align: center;
-      padding-right: 4px;
-      border-right: 1px solid rgba(255, 255, 255, 0.1);
+    }
+    .gallery-filter-pill {
+      font-size: 10px;
+      padding: 2px 8px;
+      border-radius: 12px;
+      background: rgba(255, 255, 255, 0.06);
+      color: #cbd5e1;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      cursor: pointer;
+    }
+    .gallery-filter-pill.active {
+      background: rgba(56, 189, 248, 0.2);
+      border-color: #38bdf8;
+      color: #38bdf8;
+      font-weight: 700;
+    }
+    #clip-container {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      overflow-x: auto;
       height: 100%;
+      padding-bottom: 4px;
     }
     .clip-card {
-      flex: 0 0 220px;
-      height: 94px;
+      flex: 0 0 240px;
+      height: 88px;
       background: rgba(255, 255, 255, 0.04);
       border: 1px solid rgba(255, 255, 255, 0.08);
       border-radius: 8px;
@@ -274,6 +384,9 @@
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
+      display: flex;
+      align-items: center;
+      gap: 6px;
     }
     .clip-card-meta {
       display: flex;
@@ -283,8 +396,13 @@
     }
     .clip-actions {
       display: flex;
-      gap: 6px;
+      justify-content: space-between;
+      align-items: center;
       margin-top: 4px;
+    }
+    .clip-btn-group {
+      display: flex;
+      gap: 5px;
     }
     .btn {
       font-size: 10px;
@@ -295,43 +413,113 @@
       cursor: pointer;
     }
     .btn-approve { background: #10b981; color: #fff; }
-    .btn-reject { background: #ef4444; color: #fff; }
+    .btn-reject { background: #64748b; color: #fff; }
     .btn-play { background: #38bdf8; color: #090a0f; }
+    .btn-delete {
+      background: rgba(239, 68, 68, 0.15);
+      color: #ef4444;
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      padding: 3px 6px;
+      border-radius: 4px;
+      font-size: 10px;
+      cursor: pointer;
+    }
+    .btn-delete:hover {
+      background: #ef4444;
+      color: #fff;
+    }
 
-    /* Modal Player */
+    /* Active In-Progress Job Card */
+    .clip-card.job-card {
+      border: 1px solid rgba(56, 189, 248, 0.4);
+      background: linear-gradient(135deg, rgba(56, 189, 248, 0.1) 0%, rgba(13, 16, 23, 0.95) 100%);
+      box-shadow: 0 0 16px rgba(56, 189, 248, 0.2);
+      position: relative;
+      overflow: hidden;
+    }
+    .clip-card.job-card::before {
+      content: "";
+      position: absolute;
+      top: 0; left: -100%; width: 100%; height: 100%;
+      background: linear-gradient(90deg, transparent, rgba(56, 189, 248, 0.18), transparent);
+      animation: shimmer 2s infinite;
+      pointer-events: none;
+    }
+    @keyframes shimmer {
+      0% { left: -100%; }
+      100% { left: 100%; }
+    }
+    .pulse-dot {
+      display: inline-block;
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #38bdf8;
+      box-shadow: 0 0 10px #38bdf8;
+      animation: pulse 0.9s infinite;
+      flex-shrink: 0;
+    }
+    .job-card-progress {
+      width: 100%;
+      height: 5px;
+      background: rgba(255, 255, 255, 0.08);
+      border-radius: 3px;
+      margin: 4px 0;
+      overflow: hidden;
+    }
+    .job-card-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #38bdf8, #10b981);
+      border-radius: 3px;
+      transition: width 0.3s ease;
+    }
+    .job-step-snippet {
+      font-size: 10px;
+      color: #7dd3fc;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 150px;
+    }
+
+    /* Full-Sized Widescreen Modal Player */
     #modal {
       display: none;
       position: fixed;
       inset: 0;
-      background: rgba(0, 0, 0, 0.85);
-      backdrop-filter: blur(8px);
+      background: rgba(0, 0, 0, 0.88);
+      backdrop-filter: blur(10px);
       z-index: 200;
       align-items: center;
       justify-content: center;
+      flex-direction: column;
+      gap: 14px;
     }
     #modal.active { display: flex; }
     .modal-content {
       position: relative;
-      width: 380px;
-      height: 675px;
+      width: 960px;
+      max-width: 90vw;
+      max-height: 80vh;
+      aspect-ratio: 16 / 9;
       background: #000;
-      border-radius: 16px;
+      border-radius: 14px;
       overflow: hidden;
-      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.9);
+      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.9);
       border: 1px solid rgba(255, 255, 255, 0.15);
     }
     .modal-content video {
       width: 100%;
       height: 100%;
-      object-fit: cover;
+      object-fit: contain;
     }
     .close-btn {
       position: absolute;
       top: 14px;
       right: 14px;
-      background: rgba(0, 0, 0, 0.6);
+      background: rgba(0, 0, 0, 0.65);
       color: #fff;
-      border: 1px solid rgba(255, 255, 255, 0.2);
+      border: 1px solid rgba(255, 255, 255, 0.25);
       width: 32px;
       height: 32px;
       border-radius: 50%;
@@ -342,27 +530,207 @@
       justify-content: center;
       z-index: 10;
     }
+    .modal-actions {
+      display: flex;
+      gap: 10px;
+    }
+    .modal-del-btn {
+      background: rgba(239, 68, 68, 0.2);
+      color: #ef4444;
+      border: 1px solid rgba(239, 68, 68, 0.4);
+      font-size: 12px;
+      font-weight: 700;
+      padding: 8px 18px;
+      border-radius: 8px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .modal-del-btn:hover { background: #ef4444; color: #fff; }
+
+    /* Interactive Job Progress & Log Modal */
+    #job-modal {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.88);
+      backdrop-filter: blur(14px);
+      z-index: 220;
+      align-items: center;
+      justify-content: center;
+    }
+    #job-modal.active { display: flex; }
+    .job-modal-content {
+      position: relative;
+      width: 660px;
+      max-width: 92vw;
+      max-height: 85vh;
+      background: #0d111a;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 14px;
+      padding: 22px;
+      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.9);
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      color: #f1f5f9;
+      overflow: hidden;
+    }
+    .job-modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      padding-bottom: 10px;
+    }
+    .job-stream-tag {
+      font-size: 11px;
+      font-weight: 800;
+      color: #38bdf8;
+      letter-spacing: 0.8px;
+    }
+    .job-modal-title {
+      font-size: 16px;
+      font-weight: 800;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 2px;
+    }
+    .job-progress-section {
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: 10px;
+      padding: 12px 14px;
+    }
+    .job-progress-meta {
+      display: flex;
+      justify-content: space-between;
+      font-size: 12px;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+    .job-progress-track {
+      width: 100%;
+      height: 8px;
+      background: rgba(0, 0, 0, 0.5);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+    .job-progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #38bdf8, #10b981);
+      border-radius: 4px;
+      transition: width 0.3s ease;
+      box-shadow: 0 0 12px rgba(56, 189, 248, 0.5);
+    }
+    .job-steps-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      max-height: 170px;
+      overflow-y: auto;
+      background: rgba(0, 0, 0, 0.35);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: 8px;
+      padding: 8px 10px;
+    }
+    .job-step-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 11px;
+      padding: 4px 6px;
+      border-radius: 6px;
+    }
+    .job-step-row.step-done { background: rgba(16, 185, 129, 0.08); color: #e2e8f0; }
+    .job-step-row.step-running {
+      background: rgba(56, 189, 248, 0.12);
+      border: 1px solid rgba(56, 189, 248, 0.3);
+      color: #38bdf8;
+      font-weight: 700;
+    }
+    .job-step-row.step-pending { color: #64748b; }
+    .job-step-row.step-failed { background: rgba(239, 68, 68, 0.15); color: #ef4444; }
+    .job-step-left {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .job-step-icon {
+      font-weight: 800;
+      width: 14px;
+      text-align: center;
+    }
+    .job-log-terminal {
+      height: 130px;
+      background: #05070a;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 8px;
+      padding: 8px 12px;
+      font-family: "SFMono-Regular", Consolas, Menlo, monospace;
+      font-size: 11px;
+      color: #94a3b8;
+      line-height: 1.5;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .job-modal-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      padding-top: 4px;
+    }
+    .btn-job-watch {
+      background: #10b981;
+      color: #fff;
+      font-weight: 700;
+      font-size: 12px;
+      border: none;
+      border-radius: 6px;
+      padding: 8px 16px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .btn-job-watch:hover { background: #059669; }
+    .btn-job-close {
+      background: rgba(255, 255, 255, 0.08);
+      color: #cbd5e1;
+      font-weight: 600;
+      font-size: 12px;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 6px;
+      padding: 8px 16px;
+      cursor: pointer;
+    }
+    .btn-job-close:hover { background: rgba(255, 255, 255, 0.15); color: #fff; }
   </style>
 </head>
 <body>
   <div id="viewport">
-    <!-- Top Control Bar -->
+    <!-- Top Tab Bar -->
     <div id="top-bar">
-      <div class="brand-tag">⚡ CLIPPER</div>
-      <div class="channel-input-group">
-        <input id="channel-input" type="text" placeholder="Enter channel (e.g. zarbex)" onkeydown="if(event.key==='Enter') applyChannel();" />
-        <button class="btn-action" onclick="applyChannel()">Connect</button>
-        <button class="btn-clear" onclick="clearChannel()">Stop</button>
+      <div class="top-left">
+        <div class="brand-tag">⚡ CLIPPER</div>
+        <div id="tab-strip"></div>
       </div>
-      <div id="channel-status-pill" class="status-pill status-pill-idle">● IDLE (NO CHANNEL)</div>
+      <div class="add-group">
+        <input id="channel-input" type="text" placeholder="Add channel (e.g. zarbex)" onkeydown="if(event.key==='Enter') addStreamSession();" />
+        <button class="btn-add" onclick="addStreamSession()">+ Add Stream</button>
+      </div>
     </div>
 
-    <!-- Empty State -->
+    <!-- Empty State Screen -->
     <div id="empty-state">
       <div class="empty-icon">📺</div>
-      <div class="empty-title">Awaiting Twitch Channel</div>
+      <div class="empty-title">No Active Stream Sessions</div>
       <div class="empty-desc">
-        Enter a Twitch streamer name in the top bar (e.g. <b>zarbex</b>, <b>shroud</b>, or <b>test</b>) and click <b>Connect</b> to start live ingestion, velocity tracking, and automated clipping.
+        Add one or more Twitch channels above (e.g. <b>zarbex</b>, <b>shroud</b>, or <b>test</b>) to start monitoring multiple live streams concurrently from this device.
       </div>
     </div>
 
@@ -376,10 +744,9 @@
         <span id="badge" class="badge badge-idle">STANDBY</span>
       </div>
 
-      <div class="section-title">Chat IRC Velocity</div>
-      <div class="metric-row">
-        <span class="metric-label">Instant (5s)</span>
-        <span id="instant-rate" class="metric-val" style="color: #38bdf8;">0.00 msg/s</span>
+      <div class="section-title">
+        <span>Chat IRC Velocity</span>
+        <span id="instant-rate" style="color: #38bdf8; font-family: monospace;">0.00 msg/s</span>
       </div>
       <div class="metric-row">
         <span class="metric-label">Baseline (60s)</span>
@@ -390,50 +757,141 @@
         <span id="spike-ratio" class="metric-val" style="color: #4ade80;">1.00x</span>
       </div>
 
-      <canvas id="graph" width="300" height="55"></canvas>
+      <canvas id="graph" width="310" height="46"></canvas>
 
-      <div class="section-title">Audio & OCR Telemetry</div>
-      <div class="metric-row">
-        <span class="metric-label">Audio Level (RMS)</span>
-        <span id="audio-rms" class="metric-val" style="color: #fbbf24;">-60.0 dB</span>
+      <div class="section-title" style="margin-top: 10px;">
+        <span>Audio Waveform & Level</span>
+        <span id="audio-rms" style="color: #fbbf24; font-family: monospace;">-60.0 dB</span>
       </div>
-      <div class="metric-row">
-        <span class="metric-label">OCR Multiplier</span>
-        <span id="ocr-multiplier" class="metric-val" style="color: #a78bfa;">1.0x</span>
+
+      <canvas id="waveform-canvas" width="310" height="46"></canvas>
+
+      <div class="section-title" style="margin-top: 10px;">
+        <span>OCR Win Telemetry</span>
+        <span id="ocr-multiplier" style="color: #a78bfa; font-family: monospace;">1.0x</span>
       </div>
       <div class="metric-row">
         <span class="metric-label">OCR Balance</span>
         <span id="ocr-balance" class="metric-val" style="color: #34d399;">$0.00</span>
       </div>
+
+      <div class="section-title" style="margin-top: 10px;">
+        <span>Live Twitch Chat</span>
+        <span id="chat-count-label" style="color: #64748b; font-size: 9px;">0 msgs</span>
+      </div>
+      <div id="chat-messages" class="chat-box">
+        <span style="color: #64748b; font-size: 11px;">Listening to chat...</span>
+      </div>
     </div>
 
     <!-- Bottom Triage Gallery -->
     <div id="gallery-bar">
-      <div class="gallery-title">LOCAL CLIPS</div>
-      <div id="clip-container" style="display: flex; gap: 12px; align-items: center;">
+      <div class="gallery-top">
+        <div class="gallery-title-bar">
+          <span id="gallery-stream-title" class="gallery-title">CLIPS</span>
+          <span id="clip-count-badge" style="font-size: 10px; color: #64748b;">(0)</span>
+        </div>
+        <div style="display: flex; gap: 6px;">
+          <button id="filter-current-btn" class="gallery-filter-pill active" onclick="setClipFilter('current')">Current Stream</button>
+          <button id="filter-all-btn" class="gallery-filter-pill" onclick="setClipFilter('all')">All Streams</button>
+        </div>
+      </div>
+      <div id="clip-container">
         <span style="font-size: 11px; color: #64748b;">No clips captured yet.</span>
       </div>
     </div>
   </div>
 
-  <!-- Video Modal -->
+  <!-- Full-Sized Widescreen Video Modal -->
   <div id="modal">
     <div class="modal-content">
       <button class="close-btn" onclick="closeModal()">✕</button>
       <video id="preview-player" controls autoplay loop playsinline></video>
     </div>
+    <div class="modal-actions">
+      <button id="modal-delete-btn" class="modal-del-btn" onclick="deleteCurrentModalClip()">🗑 Delete Clip</button>
+    </div>
+  </div>
+
+  <!-- Clipping Job Progress & Log Modal -->
+  <div id="job-modal">
+    <div class="job-modal-content">
+      <div class="job-modal-header">
+        <div>
+          <div id="job-modal-stream-tag" class="job-stream-tag">#CHANNEL</div>
+          <div id="job-modal-title" class="job-modal-title">
+            <span class="pulse-dot"></span> CLIPPING IN PROGRESS
+          </div>
+        </div>
+        <button class="close-btn" onclick="closeJobModal()">✕</button>
+      </div>
+
+      <div class="job-progress-section">
+        <div class="job-progress-meta">
+          <span id="job-modal-step-label">Buffering post-event reaction...</span>
+          <span id="job-modal-pct" style="color: #38bdf8;">15%</span>
+        </div>
+        <div class="job-progress-track">
+          <div id="job-modal-bar" class="job-progress-fill" style="width: 15%;"></div>
+        </div>
+      </div>
+
+      <div class="section-title" style="margin-top: 4px;">Pipeline Stages</div>
+      <div id="job-steps-list" class="job-steps-list"></div>
+
+      <div class="section-title" style="margin-top: 4px;">Remaining & Activity Log</div>
+      <pre id="job-log-terminal" class="job-log-terminal"></pre>
+
+      <div class="job-modal-actions">
+        <button id="job-watch-btn" class="btn-job-watch" style="display: none;" onclick="watchCompletedJobClip()">▶ Watch Clip Now</button>
+        <button class="btn-job-close" onclick="closeJobModal()">Close</button>
+      </div>
+    </div>
   </div>
 
   <script>
-    let activeChannel = null;
+    let activeTab = null;
+    let activeSessions = {};
+    let channelHistories = {};
+    let currentClipFilter = "current";
+    let currentActiveModalClipId = null;
+    let currentActiveJobId = null;
     let twitchPlayer = null;
+
+    // In-memory cache for fast UI updates
+    window.activeJobs = {};
+    window.recentClips = [];
 
     const canvas = document.getElementById("graph");
     const ctx = canvas.getContext("2d");
-    const history = new Array(50).fill(0);
+
+    const waveCanvas = document.getElementById("waveform-canvas");
+    const waveCtx = waveCanvas.getContext("2d");
+
+    const USER_COLORS = [
+      "#38bdf8", "#4ade80", "#fbbf24", "#a78bfa", "#f472b6",
+      "#34d399", "#f87171", "#818cf8", "#fb923c", "#2dd4bf"
+    ];
+
+    function getUserColor(username) {
+      if (!username) return "#38bdf8";
+      let hash = 0;
+      for (let i = 0; i < username.length; i++) {
+        hash = username.charCodeAt(i) + ((hash << 5) - hash);
+      }
+      return USER_COLORS[Math.abs(hash) % USER_COLORS.length];
+    }
+
+    function escapeHtml(str) {
+      if (!str) return "";
+      return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    }
 
     function drawChart() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
+      if (!activeTab || !channelHistories[activeTab]) return;
+
+      const history = channelHistories[activeTab];
       ctx.strokeStyle = "#38bdf8";
       ctx.lineWidth = 2;
       ctx.beginPath();
@@ -452,36 +910,159 @@
       ctx.fill();
     }
 
-    function updateChannelUI(channel) {
-      activeChannel = channel;
-      const statusPill = document.getElementById("channel-status-pill");
-      const title = document.getElementById("hud-channel-title");
-      const emptyState = document.getElementById("empty-state");
-      const frame = document.getElementById("twitch-frame");
+    function drawWaveform(waveData) {
+      waveCtx.clearRect(0, 0, waveCanvas.width, waveCanvas.height);
+      const w = waveCanvas.width;
+      const h = waveCanvas.height;
+      const midY = h / 2;
 
-      if (channel) {
-        statusPill.className = "status-pill status-pill-live";
-        statusPill.innerHTML = `● LIVE: #${channel}`;
-        title.innerText = `#${channel.toUpperCase()}`;
-        emptyState.style.display = "none";
-        frame.classList.add("active");
+      // Center reference baseline
+      waveCtx.strokeStyle = "rgba(255, 255, 255, 0.08)";
+      waveCtx.lineWidth = 1;
+      waveCtx.beginPath();
+      waveCtx.moveTo(0, midY);
+      waveCtx.lineTo(w, midY);
+      waveCtx.stroke();
 
-        // Embed or update Twitch Player
-        if (twitchPlayer) {
-          try { twitchPlayer.setChannel(channel); } catch (e) { createTwitchPlayer(channel); }
-        } else {
+      if (!waveData || waveData.length === 0) {
+        waveCtx.strokeStyle = "rgba(251, 191, 36, 0.35)";
+        waveCtx.lineWidth = 1.5;
+        waveCtx.beginPath();
+        for (let x = 0; x < w; x++) {
+          const y = midY + Math.sin(x * 0.12 + performance.now() * 0.003) * 1.5;
+          if (x === 0) waveCtx.moveTo(x, y);
+          else waveCtx.lineTo(x, y);
+        }
+        waveCtx.stroke();
+        return;
+      }
+
+      const barWidth = w / waveData.length;
+      const isSpiking = activeTab && activeSessions[activeTab] && (activeSessions[activeTab].audio_spike || activeSessions[activeTab].is_spiking);
+
+      const grad = waveCtx.createLinearGradient(0, 0, 0, h);
+      if (isSpiking) {
+        grad.addColorStop(0, "#ef4444");
+        grad.addColorStop(0.5, "#fbbf24");
+        grad.addColorStop(1, "#ef4444");
+      } else {
+        grad.addColorStop(0, "#fbbf24");
+        grad.addColorStop(0.5, "#38bdf8");
+        grad.addColorStop(1, "#fbbf24");
+      }
+      waveCtx.fillStyle = grad;
+
+      for (let i = 0; i < waveData.length; i++) {
+        const val = Math.abs(waveData[i]);
+        const barHeight = Math.max(2, val * (h - 6));
+        const x = i * barWidth;
+        const y = midY - barHeight / 2;
+        waveCtx.fillRect(x + 0.5, y, Math.max(1, barWidth - 1), barHeight);
+      }
+    }
+
+    let lastChatChannel = null;
+    let lastChatMessageCount = -1;
+
+    function renderChatMessages(messages, channel) {
+      const chatBox = document.getElementById("chat-messages");
+      const countLabel = document.getElementById("chat-count-label");
+      if (!chatBox) return;
+
+      if (!messages || messages.length === 0) {
+        if (lastChatChannel !== channel) {
+          chatBox.innerHTML = `<span style="color: #64748b; font-size: 11px;">Listening to #${channel || "stream"} chat...</span>`;
+          if (countLabel) countLabel.innerText = "0 msgs";
+          lastChatChannel = channel;
+          lastChatMessageCount = 0;
+        }
+        return;
+      }
+
+      if (lastChatChannel === channel && lastChatMessageCount === messages.length) return;
+      lastChatChannel = channel;
+      lastChatMessageCount = messages.length;
+
+      if (countLabel) countLabel.innerText = `${messages.length} msgs`;
+      const isNearBottom = (chatBox.scrollHeight - chatBox.scrollTop - chatBox.clientHeight) < 40;
+
+      chatBox.innerHTML = messages.map(m => `
+        <div class="chat-msg">
+          <span class="chat-user" style="color: ${getUserColor(m.user)}">${escapeHtml(m.user)}:</span>
+          <span class="chat-text">${escapeHtml(m.text)}</span>
+        </div>
+      `).join("");
+
+      if (isNearBottom || messages.length <= 8) {
+        chatBox.scrollTop = chatBox.scrollHeight;
+      }
+    }
+
+    function renderTabs() {
+      const tabStrip = document.getElementById("tab-strip");
+      const channels = Object.keys(activeSessions);
+
+      if (channels.length === 0) {
+        tabStrip.innerHTML = "";
+        document.getElementById("empty-state").style.display = "flex";
+        document.getElementById("twitch-frame").classList.remove("active");
+        document.getElementById("hud-channel-title").innerText = "STREAM HEURISTICS";
+        document.getElementById("badge").className = "badge badge-idle";
+        document.getElementById("badge").innerText = "STANDBY";
+        if (twitchPlayer) try { twitchPlayer.pause(); } catch (e) {}
+        activeTab = null;
+        drawChart();
+        drawWaveform([]);
+        renderChatMessages([], null);
+        renderGallery();
+        return;
+      }
+
+      document.getElementById("empty-state").style.display = "none";
+      document.getElementById("twitch-frame").classList.add("active");
+
+      if (!activeTab || !activeSessions[activeTab]) {
+        activeTab = channels[0];
+      }
+
+      tabStrip.innerHTML = channels.map(ch => {
+        const sess = activeSessions[ch] || {};
+        const isSpiking = sess.is_spiking || sess.audio_spike;
+        const isActive = ch === activeTab;
+        return `
+          <div class="tab-item ${isActive ? 'active' : ''}" onclick="selectTab('${ch}')">
+            <span class="tab-dot ${isSpiking ? 'spiking' : ''}"></span>
+            <span>#${ch}</span>
+            <span class="tab-close" onclick="event.stopPropagation(); closeSession('${ch}')" title="Close stream">✕</span>
+          </div>
+        `;
+      }).join("");
+    }
+
+    function selectTab(channel) {
+      if (activeTab === channel && twitchPlayer) return;
+      activeTab = channel;
+      renderTabs();
+
+      if (!channelHistories[channel]) {
+        channelHistories[channel] = new Array(50).fill(0);
+      }
+
+      document.getElementById("hud-channel-title").innerText = `#${channel.toUpperCase()}`;
+
+      if (twitchPlayer) {
+        try {
+          twitchPlayer.setChannel(channel);
+        } catch (e) {
           createTwitchPlayer(channel);
         }
       } else {
-        statusPill.className = "status-pill status-pill-idle";
-        statusPill.innerHTML = `● IDLE (NO CHANNEL)`;
-        title.innerText = "STREAM HEURISTICS";
-        emptyState.style.display = "flex";
-        frame.classList.remove("active");
-        if (twitchPlayer) {
-          try { twitchPlayer.pause(); } catch (e) {}
-        }
+        createTwitchPlayer(channel);
       }
+
+      updateActiveHUD();
+      drawChart();
+      fetchRecentClips();
     }
 
     function createTwitchPlayer(channel) {
@@ -495,120 +1076,359 @@
           parent: [window.location.hostname || "localhost", "127.0.0.1"]
         });
       } catch (err) {
-        console.warn("Twitch embed not available:", err);
+        console.warn("Twitch embed error:", err);
       }
     }
 
-    async function applyChannel() {
+    function updateActiveHUD() {
+      if (!activeTab || !activeSessions[activeTab]) {
+        document.getElementById("instant-rate").innerText = "0.00 msg/s";
+        document.getElementById("baseline-rate").innerText = "0.00 msg/s";
+        document.getElementById("spike-ratio").innerText = "1.00x";
+        document.getElementById("audio-rms").innerText = "-60.0 dB";
+        document.getElementById("ocr-multiplier").innerText = "1.0x";
+        document.getElementById("ocr-balance").innerText = "$0.00";
+        document.getElementById("badge").className = "badge badge-idle";
+        document.getElementById("badge").innerText = "STANDBY";
+        drawWaveform([]);
+        renderChatMessages([], null);
+        return;
+      }
+
+      const data = activeSessions[activeTab];
+      document.getElementById("instant-rate").innerText = `${(data.v_instant || 0).toFixed(2)} msg/s`;
+      document.getElementById("baseline-rate").innerText = `${(data.v_baseline || 0).toFixed(2)} msg/s`;
+      document.getElementById("spike-ratio").innerText = `${(data.spike_ratio || 1).toFixed(2)}x`;
+      document.getElementById("audio-rms").innerText = `${(data.audio_rms_db || -60).toFixed(1)} dB`;
+      document.getElementById("ocr-multiplier").innerText = data.ocr_multiplier || "1.0x";
+      document.getElementById("ocr-balance").innerText = data.ocr_balance || "$0.00";
+
+      const badge = document.getElementById("badge");
+      if (data.is_spiking || data.audio_spike) {
+        badge.className = "badge badge-spike";
+        badge.innerText = "TRIGGER SPIKE";
+      } else {
+        badge.className = "badge badge-idle";
+        badge.innerText = "MONITORING";
+      }
+
+      drawWaveform(data.audio_waveform || []);
+      renderChatMessages(data.recent_messages || [], activeTab);
+    }
+
+    async function addStreamSession() {
       const input = document.getElementById("channel-input");
       const channel = input.value.trim().toLowerCase().replace("#", "");
       if (!channel) return;
 
       try {
-        const res = await fetch("/api/channel", {
+        const res = await fetch("/api/sessions", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ channel })
         });
         const data = await res.json();
-        updateChannelUI(data.channel);
-        history.fill(0);
-        drawChart();
+        if (res.ok) {
+          activeSessions[channel] = { channel, status: "monitoring" };
+          input.value = "";
+          selectTab(channel);
+        } else {
+          alert("Error: " + (data.error || "Failed to add stream"));
+        }
       } catch (err) {
-        alert("Failed to connect channel: " + err);
+        alert("Network error adding session: " + err);
       }
     }
 
-    async function clearChannel() {
+    async function closeSession(channel) {
       try {
-        await fetch("/api/channel", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ channel: "" })
-        });
-        document.getElementById("channel-input").value = "";
-        updateChannelUI(null);
-        history.fill(0);
-        drawChart();
+        await fetch(`/api/sessions/${channel}`, { method: "DELETE" });
+        delete activeSessions[channel];
+        delete channelHistories[channel];
+        if (activeTab === channel) {
+          const remaining = Object.keys(activeSessions);
+          activeTab = remaining.length > 0 ? remaining[0] : null;
+        }
+        renderTabs();
+        if (activeTab) selectTab(activeTab);
       } catch (err) {
-        console.error("Failed to disconnect:", err);
+        console.error("Error closing session:", err);
       }
     }
 
-    // Connect to WebSocket Telemetry
+    function setClipFilter(filterType) {
+      currentClipFilter = filterType;
+      document.getElementById("filter-current-btn").className = `gallery-filter-pill ${filterType === 'current' ? 'active' : ''}`;
+      document.getElementById("filter-all-btn").className = `gallery-filter-pill ${filterType === 'all' ? 'active' : ''}`;
+      fetchRecentClips();
+    }
+
     const ws = new WebSocket(`ws://${window.location.hostname || "localhost"}:8765`);
     ws.onmessage = (evt) => {
       try {
-        const data = JSON.parse(evt.data);
+        const msg = JSON.parse(evt.data);
+        if (msg.sessions) {
+          for (const [ch, sData] of Object.entries(msg.sessions)) {
+            activeSessions[ch] = sData;
+            if (!channelHistories[ch]) {
+              channelHistories[ch] = new Array(50).fill(0);
+            }
+            channelHistories[ch].push(sData.v_instant || 0);
+            channelHistories[ch].shift();
+          }
 
-        // Sync channel if server updated
-        if (data.channel !== activeChannel && data.channel) {
-          document.getElementById("channel-input").value = data.channel;
-          updateChannelUI(data.channel);
-        } else if (!data.channel && activeChannel) {
-          updateChannelUI(null);
+          let channelsChanged = false;
+          for (const ch of Object.keys(activeSessions)) {
+            if (!msg.sessions[ch]) {
+              delete activeSessions[ch];
+              channelsChanged = true;
+            }
+          }
+          if (Object.keys(msg.sessions).length !== Object.keys(activeSessions).length) {
+            channelsChanged = true;
+          }
+
+          const currentSpikeKey = Object.entries(activeSessions).map(([k, v]) => `${k}:${Boolean(v.is_spiking || v.audio_spike)}`).join(",");
+          if (channelsChanged || window._lastSpikeKey !== currentSpikeKey) {
+            window._lastSpikeKey = currentSpikeKey;
+            renderTabs();
+          }
+
+          if (activeTab && activeSessions[activeTab]) {
+            updateActiveHUD();
+            drawChart();
+          }
         }
 
-        document.getElementById("instant-rate").innerText = `${data.v_instant.toFixed(2)} msg/s`;
-        document.getElementById("baseline-rate").innerText = `${data.v_baseline.toFixed(2)} msg/s`;
-        document.getElementById("spike-ratio").innerText = `${data.spike_ratio.toFixed(2)}x`;
-        document.getElementById("audio-rms").innerText = `${data.audio_rms_db.toFixed(1)} dB`;
-        document.getElementById("ocr-multiplier").innerText = data.ocr_multiplier || "1.0x";
-        document.getElementById("ocr-balance").innerText = data.ocr_balance || "$0.00";
+        // Real-time active clipping jobs
+        if (msg.active_jobs !== undefined) {
+          window.activeJobs = msg.active_jobs || {};
+          renderGallery();
 
-        const badge = document.getElementById("badge");
-        if (data.status === "idle") {
-          badge.className = "badge badge-idle";
-          badge.innerText = "STANDBY";
-        } else if (data.is_spiking || data.audio_spike) {
-          badge.className = "badge badge-spike";
-          badge.innerText = "TRIGGER SPIKE";
-        } else {
-          badge.className = "badge badge-idle";
-          badge.innerText = "MONITORING";
+          if (currentActiveJobId && window.activeJobs[currentActiveJobId]) {
+            renderJobModal(window.activeJobs[currentActiveJobId]);
+          }
         }
 
-        if (data.recent_clip) {
+        if (msg.recent_clip) {
           fetchRecentClips();
         }
-
-        history.push(data.v_instant);
-        history.shift();
-        drawChart();
       } catch (err) {
         console.error("Telemetry error:", err);
       }
     };
 
-    // Fetch and render local clips gallery
     async function fetchRecentClips() {
       try {
-        const res = await fetch("/api/clips?limit=15");
-        if (!res.ok) return;
-        const clips = await res.json();
-        const container = document.getElementById("clip-container");
-        if (!clips || clips.length === 0) {
-          container.innerHTML = '<span style="font-size: 11px; color: #64748b;">No clips captured yet.</span>';
-          return;
+        let url = "/api/clips?limit=40";
+        if (currentClipFilter === "current" && activeTab) {
+          url += `&channel=${encodeURIComponent(activeTab)}`;
         }
 
-        container.innerHTML = clips.map(c => `
-          <div class="clip-card" onclick="openModal('${c.video_url}')">
-            <div class="clip-card-header">${c.suggested_title}</div>
-            <div class="clip-card-meta">
-              <span>⏱ ${c.duration_seconds}s</span>
-              <span style="color: #38bdf8; font-weight: 700;">★ ${c.heuristic_score}/10</span>
-              <span style="color: ${c.status === 'approved' ? '#10b981' : '#f59e0b'};">${c.status}</span>
-            </div>
-            <div class="clip-actions" onclick="event.stopPropagation();">
-              <button class="btn btn-play" onclick="openModal('${c.video_url}')">▶ Preview</button>
+        const res = await fetch(url);
+        if (res.ok) {
+          window.recentClips = await res.json();
+          renderGallery();
+        }
+      } catch (err) {
+        console.error("Failed to load clips:", err);
+      }
+    }
+
+    function renderGallery() {
+      const container = document.getElementById("clip-container");
+      const titleEl = document.getElementById("gallery-stream-title");
+      const countBadge = document.getElementById("clip-count-badge");
+
+      if (currentClipFilter === "current" && activeTab) {
+        titleEl.innerText = `CLIPS FOR #${activeTab.toUpperCase()}`;
+      } else {
+        titleEl.innerText = "ALL STREAM CLIPS";
+      }
+
+      // 1. Filter active in-progress clipping jobs
+      const jobsList = Object.values(window.activeJobs || {}).filter(j => {
+        if (j.status === "completed") return false; // finished clips will appear in recentClips
+        if (currentClipFilter === "current" && activeTab) {
+          return j.channel === activeTab;
+        }
+        return true;
+      });
+
+      // 2. Filter existing saved clips
+      const clipsList = window.recentClips || [];
+      const totalCount = jobsList.length + clipsList.length;
+      countBadge.innerText = `(${totalCount})`;
+
+      if (totalCount === 0) {
+        const emptyMsg = (currentClipFilter === "current" && activeTab)
+          ? `No clips captured for #${activeTab} yet.`
+          : "No clips captured yet.";
+        container.innerHTML = `<span style="font-size: 11px; color: #64748b;">${emptyMsg}</span>`;
+        return;
+      }
+
+      // Render in-progress job cards first with shimmering loading indicator
+      const jobCardsHtml = jobsList.map(j => `
+        <div class="clip-card job-card" onclick="openJobModal('${j.id}')">
+          <div class="clip-card-header">
+            <span class="pulse-dot"></span>
+            <span style="color: #38bdf8; font-weight: 800;">#${j.channel}</span> CLIPPING (${j.progress_pct}%)
+          </div>
+          <div class="job-card-progress">
+            <div class="job-card-fill" style="width: ${j.progress_pct}%;"></div>
+          </div>
+          <div class="clip-card-meta">
+            <span class="job-step-snippet" title="${escapeHtml(j.current_step)}">${escapeHtml(j.current_step)}</span>
+            <span style="color: #fbbf24; font-weight: 700;">★ ${j.score}/10</span>
+          </div>
+          <div class="clip-actions" style="margin-top: 2px;">
+            <span style="font-size: 10px; color: #38bdf8; font-weight: 600;">Click for live logs ↗</span>
+            <span style="font-size: 11px;">⏳</span>
+          </div>
+        </div>
+      `).join("");
+
+      // Render finished saved clips
+      const clipCardsHtml = clipsList.map(c => `
+        <div class="clip-card" id="card-${c.id}" onclick="openModal('${c.video_url}', '${c.id}')">
+          <div class="clip-card-header">
+            <span style="color: #38bdf8; font-weight: 800;">#${c.channel_name}</span> ${escapeHtml(c.suggested_title)}
+          </div>
+          <div class="clip-card-meta">
+            <span>⏱ ${c.duration_seconds}s</span>
+            <span style="color: #38bdf8; font-weight: 700;">★ ${c.heuristic_score}/10</span>
+            <span style="color: ${c.status === 'approved' ? '#10b981' : '#f59e0b'};">${c.status}</span>
+          </div>
+          <div class="clip-actions" onclick="event.stopPropagation();">
+            <div class="clip-btn-group">
+              <button class="btn btn-play" onclick="openModal('${c.video_url}', '${c.id}')">▶ Play</button>
               <button class="btn btn-approve" onclick="updateStatus('${c.id}', 'approved')">✓</button>
               <button class="btn btn-reject" onclick="updateStatus('${c.id}', 'rejected')">✕</button>
             </div>
+            <button class="btn-delete" onclick="deleteClip('${c.id}')" title="Delete clip">🗑</button>
           </div>
-        `).join("");
+        </div>
+      `).join("");
+
+      container.innerHTML = jobCardsHtml + clipCardsHtml;
+    }
+
+    /* Job Progress Modal Logic */
+    function openJobModal(jobId) {
+      currentActiveJobId = jobId;
+      const modal = document.getElementById("job-modal");
+      modal.classList.add("active");
+
+      const job = (window.activeJobs && window.activeJobs[jobId]);
+      if (job) {
+        renderJobModal(job);
+      } else {
+        // Fallback fetch
+        fetch(`/api/jobs/${jobId}`)
+          .then(r => r.json())
+          .then(j => renderJobModal(j))
+          .catch(e => console.error(e));
+      }
+    }
+
+    function closeJobModal() {
+      currentActiveJobId = null;
+      document.getElementById("job-modal").classList.remove("active");
+    }
+
+    function renderJobModal(job) {
+      if (!job) return;
+
+      document.getElementById("job-modal-stream-tag").innerText = `#${(job.channel || "").toUpperCase()} • SCORE ★ ${job.score || 7}/10`;
+      
+      const titleEl = document.getElementById("job-modal-title");
+      if (job.status === "completed") {
+        titleEl.innerHTML = `<span style="color: #10b981;">✓</span> CLIP GENERATION COMPLETE`;
+      } else if (job.status === "failed") {
+        titleEl.innerHTML = `<span style="color: #ef4444;">✕</span> CLIP GENERATION FAILED`;
+      } else {
+        titleEl.innerHTML = `<span class="pulse-dot"></span> CLIPPING IN PROGRESS (${job.progress_pct || 0}%)`;
+      }
+
+      document.getElementById("job-modal-step-label").innerText = job.current_step || "Processing pipeline...";
+      document.getElementById("job-modal-pct").innerText = `${job.progress_pct || 0}%`;
+      document.getElementById("job-modal-bar").style.width = `${job.progress_pct || 0}%`;
+
+      // Render checklist of pipeline stages
+      const stepsList = document.getElementById("job-steps-list");
+      if (job.steps && Array.isArray(job.steps)) {
+        stepsList.innerHTML = job.steps.map(s => {
+          let icon = "○";
+          let rowClass = "step-pending";
+          if (s.status === "done") {
+            icon = "✓";
+            rowClass = "step-done";
+          } else if (s.status === "running") {
+            icon = "⟳";
+            rowClass = "step-running";
+          } else if (s.status === "failed") {
+            icon = "✕";
+            rowClass = "step-failed";
+          }
+
+          return `
+            <div class="job-step-row ${rowClass}">
+              <div class="job-step-left">
+                <span class="job-step-icon">${icon}</span>
+                <span>${escapeHtml(s.name)}</span>
+              </div>
+              <span style="font-size: 10px; opacity: 0.85;">${escapeHtml(s.detail || "")}</span>
+            </div>
+          `;
+        }).join("");
+      }
+
+      // Render live log console
+      const term = document.getElementById("job-log-terminal");
+      if (job.logs && Array.isArray(job.logs)) {
+        term.innerText = job.logs.join("\n");
+        term.scrollTop = term.scrollHeight;
+      }
+
+      // Action buttons
+      const watchBtn = document.getElementById("job-watch-btn");
+      if (job.status === "completed" && job.clip) {
+        watchBtn.style.display = "flex";
+      } else {
+        watchBtn.style.display = "none";
+      }
+    }
+
+    function watchCompletedJobClip() {
+      if (!currentActiveJobId) return;
+      const job = window.activeJobs && window.activeJobs[currentActiveJobId];
+      if (job && job.clip) {
+        closeJobModal();
+        openModal(job.clip.video_url, job.clip.id);
+      }
+    }
+
+    async function deleteClip(clipId) {
+      if (!confirm("Are you sure you want to permanently delete this clip?")) return;
+      try {
+        const res = await fetch(`/api/clips/${clipId}`, { method: "DELETE" });
+        if (res.ok) {
+          fetchRecentClips();
+          if (currentActiveModalClipId === clipId) {
+            closeModal();
+          }
+        } else {
+          alert("Failed to delete clip.");
+        }
       } catch (err) {
-        console.error("Failed to load clips:", err);
+        alert("Error deleting clip: " + err);
+      }
+    }
+
+    function deleteCurrentModalClip() {
+      if (currentActiveModalClipId) {
+        deleteClip(currentActiveModalClipId);
       }
     }
 
@@ -625,7 +1445,8 @@
       }
     }
 
-    function openModal(videoUrl) {
+    function openModal(videoUrl, clipId) {
+      currentActiveModalClipId = clipId;
       const modal = document.getElementById("modal");
       const player = document.getElementById("preview-player");
       player.src = videoUrl;
@@ -634,6 +1455,7 @@
     }
 
     function closeModal() {
+      currentActiveModalClipId = null;
       const modal = document.getElementById("modal");
       const player = document.getElementById("preview-player");
       player.pause();
@@ -641,11 +1463,19 @@
       modal.classList.remove("active");
     }
 
-    // Initial check on load
-    fetch("/api/channel")
+    fetch("/api/sessions")
       .then(r => r.json())
-      .then(d => { if (d.channel) updateChannelUI(d.channel); else updateChannelUI(null); })
-      .catch(() => updateChannelUI(null));
+      .then(sessions => {
+        if (Array.isArray(sessions) && sessions.length > 0) {
+          for (const s of sessions) {
+            activeSessions[s.channel] = s;
+          }
+          selectTab(sessions[0].channel);
+        } else {
+          renderTabs();
+        }
+      })
+      .catch(() => renderTabs());
 
     fetchRecentClips();
   </script>

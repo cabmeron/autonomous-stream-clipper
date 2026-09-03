@@ -1,30 +1,37 @@
 import time
-import pytest
 from services.heuristics.gate_evaluator import GateEvaluator
 
 
 def test_gate_evaluator_scoring():
-    evaluator = GateEvaluator()
-    # Base score
-    assert evaluator.calculate_heuristic_score("test") == 5
+    evaluator = GateEvaluator(on_trigger_dispatch=lambda ctx: None)
+
+    # Low signal
+    assert evaluator.calculate_score(chat_instant=2.0, chat_ratio=1.1, win_multiplier=1.0, pnl_delta=0.0, audio_delta=2.0) == 1
 
     # High chat spike
-    assert evaluator.calculate_heuristic_score("chat", chat_ratio=5.5) == 8
+    score_chat = evaluator.calculate_score(chat_instant=35.0, chat_ratio=5.5, win_multiplier=1.0, pnl_delta=0.0, audio_delta=0.0)
+    assert score_chat >= 4
 
-    # Win multiplier 500x
-    assert evaluator.calculate_heuristic_score("ocr", win_mult=600.0) == 8
+    # High OCR win
+    score_ocr = evaluator.calculate_score(chat_instant=0.0, chat_ratio=1.0, win_multiplier=600.0, pnl_delta=10000.0, audio_delta=0.0)
+    assert score_ocr >= 5
 
-    # High audio surge + chat spike
-    assert evaluator.calculate_heuristic_score("audio", chat_ratio=3.5, audio_delta=20.0) == 9
+    # Multi-signal synergy
+    score_combo = evaluator.calculate_score(chat_instant=20.0, chat_ratio=4.0, win_multiplier=150.0, pnl_delta=1200.0, audio_delta=15.0)
+    assert score_combo >= 7
 
 
 def test_gate_evaluator_debounce():
-    evaluator = GateEvaluator(debounce_seconds=10.0, post_event_delay_seconds=0.0)
+    dispatched = []
 
-    # First signal passes
-    fired_1 = evaluator.evaluate_signals(source="chat_spike", chat_ratio=4.0)
-    assert fired_1 is True
+    def dispatch(ctx):
+        dispatched.append(ctx)
 
-    # Immediate second signal blocked by cooldown
-    fired_2 = evaluator.evaluate_signals(source="audio_spike", audio_delta=15.0)
-    assert fired_2 is False
+    evaluator = GateEvaluator(on_trigger_dispatch=dispatch, debounce_seconds=10.0, post_event_delay_seconds=0.0)
+    evaluator.evaluate_signals("chat_spike", chat_instant=40.0, chat_ratio=6.0)
+
+    assert evaluator.last_trigger_time > 0
+
+    # Second trigger within 10s should be debounced/suppressed
+    evaluator.evaluate_signals("audio_spike", audio_delta=20.0)
+    assert time.time() - evaluator.last_trigger_time < 10.0

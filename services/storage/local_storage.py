@@ -7,42 +7,44 @@ logger = logging.getLogger(__name__)
 
 
 class LocalStorageManager:
-    """Manages local filesystem storage for rendered clips and thumbnails without external services."""
+    """Stores rendered video clips and thumbnails on the local filesystem and serves them via relative HTTP URLs."""
 
-    def __init__(self, storage_dir: str = "./storage/clips", public_prefix: str = "/clips"):
+    def __init__(self, storage_dir: str = "./storage/clips", base_url: str = "/clips"):
         self.storage_dir = os.path.abspath(storage_dir)
-        self.public_prefix = public_prefix.rstrip("/")
+        self.base_url = base_url.rstrip("/")
         os.makedirs(self.storage_dir, exist_ok=True)
         logger.info("[Storage] Local storage initialized at: %s", self.storage_dir)
 
-    def store_file(self, file_path: str, filename: Optional[str] = None) -> str:
-        """Copies a media file to the local storage directory and returns its local web URL."""
-        if not os.path.exists(file_path):
-            raise FileNotFoundError(f"Source file not found: {file_path}")
+    def store_clip_bundle(self, local_video_path: str, local_thumb_path: str) -> Tuple[str, str]:
+        """Copies video and thumbnail into the permanent local storage directory and returns local access URLs."""
+        video_filename = os.path.basename(local_video_path)
+        thumb_filename = os.path.basename(local_thumb_path)
 
-        name = filename or os.path.basename(file_path)
-        dest_path = os.path.join(self.storage_dir, name)
-        os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+        dest_video = os.path.join(self.storage_dir, video_filename)
+        dest_thumb = os.path.join(self.storage_dir, thumb_filename)
 
-        if os.path.abspath(file_path) != dest_path:
-            shutil.copy2(file_path, dest_path)
+        shutil.copy2(local_video_path, dest_video)
+        shutil.copy2(local_thumb_path, dest_thumb)
 
-        return f"{self.public_prefix}/{name}"
+        video_url = f"{self.base_url}/{video_filename}"
+        thumb_url = f"{self.base_url}/{thumb_filename}"
 
-    def store_clip_bundle(
-        self,
-        video_path: str,
-        thumbnail_path: Optional[str] = None,
-        clip_id: Optional[str] = None,
-    ) -> Tuple[str, Optional[str]]:
-        """Stores both the vertical clip video and thumbnail locally."""
-        prefix = f"{clip_id}_" if clip_id else ""
-        video_name = f"{prefix}{os.path.basename(video_path)}"
-        video_url = self.store_file(video_path, filename=video_name)
-
-        thumb_url = None
-        if thumbnail_path and os.path.exists(thumbnail_path):
-            thumb_name = f"{prefix}{os.path.basename(thumbnail_path)}"
-            thumb_url = self.store_file(thumbnail_path, filename=thumb_name)
-
+        logger.info("[Storage] Saved clip locally: %s -> %s", video_filename, video_url)
         return video_url, thumb_url
+
+    def delete_clip_bundle(self, video_url: str, thumb_url: Optional[str] = None) -> bool:
+        """Deletes video and thumbnail files from local storage."""
+        deleted = False
+        for url in (video_url, thumb_url):
+            if not url:
+                continue
+            filename = os.path.basename(url)
+            target = os.path.join(self.storage_dir, filename)
+            if os.path.exists(target):
+                try:
+                    os.remove(target)
+                    deleted = True
+                    logger.info("[Storage] Deleted file: %s", target)
+                except OSError as e:
+                    logger.error("[Storage] Failed to delete file %s: %s", target, e)
+        return deleted

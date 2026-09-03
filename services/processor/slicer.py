@@ -2,80 +2,71 @@ import glob
 import logging
 import os
 import subprocess
+import tempfile
 import time
-from typing import Optional
-from services.ingest.stream_buffer import get_default_shm_dir
+from typing import List, Optional
 
 logger = logging.getLogger(__name__)
 
 
 class SegmentSlicer:
-    """Extracts and concatenates the target slice from the ring buffer without re-encoding."""
+    """Zero-copy extraction of a 60-second window (-45s to +15s of event) from the RAM ring buffer."""
 
     @staticmethod
     def extract_window(
         channel: str,
         duration_seconds: int = 60,
-        shm_dir: Optional[str] = None,
         output_dir: str = "/tmp/clipper_candidates",
+        shm_base: Optional[str] = None,
     ) -> Optional[str]:
-        """Concatenates the latest MPEG-TS segments covering the candidate duration."""
-        base_shm = shm_dir or get_default_shm_dir()
-        target_dir = os.path.join(base_shm, channel.lower().lstrip("#"))
-        os.makedirs(output_dir, exist_ok=True)
+        channel_clean = channel.lower().lstrip("#")
+        base = shm_base or ("/dev/shm/clipper" if os.path.exists("/dev/shm") else "/tmp/clipper_shm")
+        channel_dir = os.path.join(base, channel_clean)
 
-        if not os.path.exists(target_dir):
-            logger.warning("[Slicer] Buffer directory does not exist: %s", target_dir)
+        if not os.path.exists(channel_dir):
+            logger.error("[Slicer] Channel buffer directory %s does not exist.", channel_dir)
             return None
 
-        # Order segments chronologically by modification time
-        segments = glob.glob(os.path.join(target_dir, "seg_*.ts"))
+        segments = glob.glob(os.path.join(channel_dir, "seg_*.ts"))
         if not segments:
-            logger.warning("[Slicer] No segments found in %s", target_dir)
+            logger.error("[Slicer] No TS segments available in %s.", channel_dir)
             return None
 
         segments.sort(key=os.path.getmtime)
+        # 60s @ 10s per segment = 6 segments
+        target_count = max(1, duration_seconds // 10)
+        selected = segments[-target_count:]
 
-        # 10 seconds per segment + 1 safety segment
-        needed = (duration_seconds // 10) + 1
-        selected = segments[-needed:] if len(segments) >= needed else segments
-
+        os.makedirs(output_dir, exist_ok=True)
         timestamp = int(time.time())
-        out_file = os.path.join(output_dir, f"raw_{channel}_{timestamp}.mp4")
-        concat_manifest = os.path.join(output_dir, f"concat_{timestamp}.txt")
+        output_file = os.path.join(output_dir, f"raw_{channel_clean}_{timestamp}.mp4")
+
+        # Build FFmpeg concat list file
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
+            for seg in selected:
+                f.write(f"file '{os.path.abspath(seg)}'\n")
+            concat_list = f.name
 
         try:
-            with open(concat_manifest, "w") as f:
-                for seg in selected:
-                    abs_path = os.path.abspath(seg)
-                    f.write(f"file '{abs_path}'\n")
-
             cmd = [
                 "ffmpeg",
                 "-hide_banner",
                 "-loglevel", "error",
                 "-f", "concat",
                 "-safe", "0",
-                "-i", concat_manifest,
+                "-i", concat_list,
                 "-c", "copy",
-                "-movflags", "+faststart",
-                "-y",
-                out_file,
+                "-y", output_file,
             ]
-            subprocess.run(cmd, check=True)
-            logger.info(
-                "[Slicer] Extracted candidate %s (%d segments, ~%ds)",
-                out_file,
-                len(selected),
-                len(selected) * 10,
-            )
-            return out_file
-        except Exception as err:
-            logger.error("[Slicer] Concatenation failed: %s", err)
+            subprocess.run(cmd, check=True, timeout=15)
+            logger.info("[Slicer] Successfully created %s from %d segments", output_file, len(selected))
+            return output_file
+        except Exception as e:
+            logger.error("[Slicer] Failed to concatenate segments: %s", e)
             return None
         finally:
-            if os.path.exists(concat_manifest):
+            if os.path.exists(concat_list):
                 try:
-                    os.remove(concat_manifest)
+                    os.remove(concat_list)
                 except OSError:
                     pass

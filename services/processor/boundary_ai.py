@@ -1,155 +1,87 @@
-import json
 import logging
-import os
-import re
-from typing import List, Optional
+from typing import List
 
 logger = logging.getLogger(__name__)
 
 
 class BoundaryOptimizer:
-    """100% Local Boundary Optimizer.
+    """Calculates optimal in/out cut points (20s-58s) using word timestamps and speech pause detection."""
 
-    Uses word timestamps, acoustic trigger centering, and natural speech pauses
-    to find high-retention hook-and-payoff boundaries without external AI APIs.
-    """
-
-    def __init__(self, ollama_url: Optional[str] = None):
-        # Optional local Ollama endpoint (e.g. http://localhost:11434)
-        self.ollama_url = ollama_url or os.getenv("OLLAMA_URL")
+    def __init__(self, api_key: str = None):
+        logger.info("[BoundaryOptimizer] Operating in 100% local heuristic mode (zero external APIs).")
 
     def find_optimal_cut(
         self,
         words: List[dict],
-        telemetry_context: Optional[dict] = None,
+        event_context: dict,
         total_duration: float = 60.0,
     ) -> dict:
-        """Calculates optimal start and end cut points locally using pause detection and trigger centering."""
-        telemetry_context = telemetry_context or {}
+        """Determines tight clip boundaries centered around the trigger moment."""
+        # Trigger occurred ~15s before the end of the buffered window
+        trigger_time = max(5.0, total_duration - 15.0) if total_duration > 20.0 else (total_duration * 0.7)
+        mult = event_context.get("win_multiplier", 1.0)
+        pnl = event_context.get("pnl_delta", 0.0)
+        source = event_context.get("trigger_source", "chat_spike")
 
-        # Candidate window is -45s to +15s of trigger.
-        # Therefore, the focal climax event is situated around t ≈ 45.0s in the 60s slice.
-        event_time = min(total_duration - 10.0, max(15.0, total_duration - 15.0))
-
-        # 1. Target start: between 15s and 30s before the event
-        ideal_start = max(0.0, event_time - 25.0)
-
-        # 2. Target end: between 5s and 12s after the event
-        ideal_end = min(total_duration, event_time + 10.0)
-
-        cut_start = ideal_start
-        cut_end = ideal_end
-
-        # Refine boundaries using word timestamps and speech pauses
-        if words and len(words) >= 2:
-            # Find closest natural speech boundary before the hook
-            best_start_diff = float("inf")
-            for i, w in enumerate(words):
-                w_start = w.get("start", 0.0)
-                # Check for pause before this word
-                prev_end = words[i - 1].get("end", 0.0) if i > 0 else 0.0
-                pause = w_start - prev_end
-
-                # Prefer starting after a pause (>0.35s) near the ideal start window
-                if 5.0 <= w_start <= event_time - 12.0:
-                    diff = abs(w_start - ideal_start) - (1.5 if pause >= 0.35 else 0.0)
-                    if diff < best_start_diff:
-                        best_start_diff = diff
-                        cut_start = max(0.0, w_start - 0.2)
-
-            # Find closest natural speech boundary after the reaction
-            best_end_diff = float("inf")
-            for i, w in enumerate(words):
-                w_end = w.get("end", 0.0)
-                next_start = words[i + 1].get("start", total_duration) if i < len(words) - 1 else total_duration
-                pause = next_start - w_end
-
-                # Prefer ending on a pause (>0.35s) after the event payoff
-                if event_time + 3.0 <= w_end <= total_duration:
-                    diff = abs(w_end - ideal_end) - (1.5 if pause >= 0.35 else 0.0)
-                    if diff < best_end_diff:
-                        best_end_diff = diff
-                        cut_end = min(total_duration, w_end + 0.4)
-
-        # Enforce duration constraints (20s <= duration <= 58s)
-        duration = cut_end - cut_start
-        if duration < 20.0:
-            deficit = 20.0 - duration
-            cut_start = max(0.0, cut_start - (deficit / 2.0))
-            cut_end = min(total_duration, cut_end + (deficit / 2.0))
-            if cut_end - cut_start < 20.0:
-                cut_end = min(total_duration, cut_start + 22.0)
-
-        if cut_end - cut_start > 58.0:
-            cut_end = cut_start + 58.0
-
-        cut_start = round(cut_start, 2)
-        cut_end = round(cut_end, 2)
-        final_duration = round(cut_end - cut_start, 2)
-
-        # Generate localized viral metadata
-        meta = self._generate_local_metadata(words, telemetry_context, cut_start, cut_end)
-
-        logger.info(
-            "[BoundaryOptimizer:Local] Cut: [%.1fs -> %.1fs] (%.1fs) | Title: %s",
-            cut_start,
-            cut_end,
-            final_duration,
-            meta["title"],
-        )
-
-        return {
-            "cut_start": cut_start,
-            "cut_end": cut_end,
-            "title": meta["title"],
-            "caption": meta["caption"],
-            "score": meta["score"],
-        }
-
-    def _generate_local_metadata(
-        self,
-        words: List[dict],
-        context: dict,
-        cut_start: float,
-        cut_end: float,
-    ) -> dict:
-        """Generates viral titles, captions, and heuristic score locally."""
-        multiplier = context.get("win_multiplier", 1.0)
-        pnl = context.get("pnl_delta", 0.0)
-        source = context.get("trigger_source", "Hype Spike")
-        chat_peak = context.get("chat_instant", 0.0)
-        audio_jump = context.get("audio_delta", 0.0)
-
-        # Extract words in the clip window
-        clip_words = [
-            w.get("word", "").upper()
-            for w in words
-            if cut_start <= w.get("start", 0) <= cut_end
-        ]
-        text_content = " ".join(clip_words)
-
-        # Detect high-engagement keywords
-        hype_detected = bool(re.search(r'\b(OMG|UNREAL|NO WAY|INSANE|LOOK|WHAT|LET\'?S GO|HOLY|HUGE|MASSIVE)\b', text_content))
-
-        # Title formatting logic
-        if multiplier >= 100.0:
-            title = f"INSANE {int(multiplier)}X WIN ON STREAM! 🤯"
+        # Dynamic title & caption generation
+        if mult >= 100.0:
+            title = f"INSANE {int(mult)}X MULTIPLIER HIT!"
+            caption = f" streamer just hit a massive {int(mult)}x win! #twitch #gaming #viral"
         elif pnl >= 1000.0:
-            title = f"+${pnl:,.0f} MASSIVE WIN ON STREAM! 💰"
-        elif audio_jump >= 15.0:
-            title = "STREAMER COMPLETELY LOST IT HERE! 🔊"
-        elif chat_peak >= 25.0:
-            title = "CHAT WENT COMPLETELY WILD! 🚀"
-        elif hype_detected:
-            title = "NO WAY THIS ACTUALLY JUST HAPPENED! 😱"
+            title = f"STREAMER WINS +${pnl:,.0f} LIVE!"
+            caption = f"Unreal profit live on stream! #twitch #win"
+        elif "audio" in source:
+            title = "THE BIGGEST REACTION OF THE STREAM!"
+            caption = "Wait for the scream at the end... #streamer #clips"
         else:
-            title = f"CRAZY STREAM MOMENT ({source.replace('_', ' ').upper()}) 🔥"
+            title = "CHAT WENT ABSOLUTELY CRAZY FOR THIS!"
+            caption = "Twitch chat was moving too fast to read! #twitchclips #highlight"
 
-        caption = f"{title} Clip captured live with velocity tracking. #twitch #streamer #clips #viral"
-        score = context.get("score", 8)
+        target_start = max(0.0, trigger_time - 28.0)
+        target_end = min(total_duration, trigger_time + 12.0)
+
+        # If no words detected, fall back to safe centered window
+        if not words:
+            best_start = target_start
+            best_end = target_end
+        else:
+            # 1. Identify natural speech pause before the event to place cut_start
+            best_start = target_start
+            for i in range(len(words) - 1):
+                pause_len = words[i + 1]["start"] - words[i]["end"]
+                if pause_len >= 0.45 and target_start <= words[i]["end"] <= max(target_start + 1.0, trigger_time - 5.0):
+                    best_start = words[i]["end"] + 0.1
+                    break
+
+            # 2. Identify post-reaction speech pause to place cut_end
+            best_end = target_end
+            for i in range(len(words) - 1):
+                if words[i]["end"] >= trigger_time + 3.0:
+                    pause_len = words[i + 1]["start"] - words[i]["end"]
+                    if pause_len >= 0.5:
+                        best_end = min(total_duration, words[i]["end"] + 0.5)
+                        break
+
+        # Enforce target duration between min_allowed and max_allowed
+        max_allowed = min(58.0, total_duration)
+        min_allowed = min(20.0, total_duration)
+        curr_dur = best_end - best_start
+
+        if curr_dur < min_allowed:
+            best_start = max(0.0, best_end - min_allowed)
+            if (best_end - best_start) < min_allowed:
+                best_end = min(total_duration, best_start + min_allowed)
+        elif curr_dur > max_allowed:
+            best_start = max(0.0, best_end - max_allowed)
+
+        # Ensure start and end are strictly within [0.0, total_duration]
+        best_start = max(0.0, min(best_start, total_duration - 2.0))
+        best_end = min(total_duration, max(best_end, best_start + 2.0))
 
         return {
+            "cut_start": round(best_start, 2),
+            "cut_end": round(best_end, 2),
             "title": title,
             "caption": caption,
-            "score": score,
+            "score": event_context.get("score", 8 if words else 7),
         }
