@@ -12,6 +12,8 @@ It optimizes boundaries around natural speech pauses and renders high-retention 
 
 All media and metadata are saved locally to an embedded SQLite database and local disk storage.
 
+<img width="1153" height="847" alt="Screenshot 2026-09-03 at 12 33 55 PM" src="https://github.com/user-attachments/assets/d9cea51c-dfd0-4c42-bf4e-cb0418c4da89" />
+
 ## Installation
 
 Clone the repository and set up a Python virtual environment. Install all required dependencies using `pip install -r requirements.txt`. Ensure FFmpeg is installed on your system.
