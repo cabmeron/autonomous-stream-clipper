@@ -35,3 +35,33 @@ def test_gate_evaluator_debounce():
     # Second trigger within 10s should be debounced/suppressed
     evaluator.evaluate_signals("audio_spike", audio_delta=20.0)
     assert time.time() - evaluator.last_trigger_time < 10.0
+
+
+def test_single_audio_spike_qualifies():
+    activated = []
+    evaluator = GateEvaluator(
+        on_trigger_dispatch=lambda ctx: None,
+        on_trigger_activated=lambda ctx: activated.append(ctx),
+        debounce_seconds=5.0,
+        post_event_delay_seconds=0.0,
+    )
+    score = evaluator.calculate_score(chat_instant=2.0, chat_ratio=1.0, win_multiplier=1.0, pnl_delta=0.0, audio_delta=14.0)
+    assert score >= 4
+    evaluator.evaluate_signals("audio_spike", audio_delta=14.0)
+    assert len(activated) == 1
+    assert activated[0]["score"] >= 4
+
+
+def test_single_chat_spike_qualifies():
+    activated = []
+    evaluator = GateEvaluator(
+        on_trigger_dispatch=lambda ctx: None,
+        on_trigger_activated=lambda ctx: activated.append(ctx),
+        debounce_seconds=5.0,
+        post_event_delay_seconds=0.0,
+    )
+    score = evaluator.calculate_score(chat_instant=15.0, chat_ratio=3.5, win_multiplier=1.0, pnl_delta=0.0, audio_delta=0.0)
+    assert score >= 4
+    evaluator.evaluate_signals("chat_spike", chat_instant=15.0, chat_ratio=3.5)
+    assert len(activated) == 1
+    assert activated[0]["score"] >= 4

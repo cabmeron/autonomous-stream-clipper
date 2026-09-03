@@ -14,8 +14,8 @@ class GateEvaluator:
         self,
         on_trigger_dispatch: Callable[[dict], None],
         on_trigger_activated: Optional[Callable[[dict], None]] = None,
-        debounce_seconds: float = 90.0,
-        post_event_delay_seconds: float = 15.0,
+        debounce_seconds: float = 30.0,
+        post_event_delay_seconds: float = 10.0,
     ):
         self.dispatch = on_trigger_dispatch
         self.on_trigger_activated = on_trigger_activated
@@ -34,20 +34,26 @@ class GateEvaluator:
         """Computes a heuristic excitement score from 1 to 10."""
         score = 0
         if chat_ratio >= 5.0 or chat_instant >= 30.0:
+            score += 5
+        elif chat_ratio >= 3.0 or chat_instant >= 12.0:
             score += 4
-        elif chat_ratio >= 3.0 or chat_instant >= 15.0:
+        elif chat_ratio >= 2.0 or chat_instant >= 8.0:
             score += 2
 
         if win_multiplier >= 500.0 or pnl_delta >= 5000.0:
             score += 5
         elif win_multiplier >= 100.0 or pnl_delta >= 1000.0:
+            score += 4
+        elif win_multiplier >= 20.0 or pnl_delta >= 500.0:
             score += 3
-        elif win_multiplier >= 20.0:
+        elif win_multiplier >= 5.0:
             score += 1
 
         if audio_delta >= 18.0:
-            score += 3
+            score += 5
         elif audio_delta >= 12.0:
+            score += 4
+        elif audio_delta >= 8.0:
             score += 2
 
         return min(10, max(1, score))

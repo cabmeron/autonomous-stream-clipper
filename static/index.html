@@ -1202,7 +1202,16 @@
 
         // Real-time active clipping jobs
         if (msg.active_jobs !== undefined) {
+          const prevJobs = window.activeJobs || {};
           window.activeJobs = msg.active_jobs || {};
+
+          // Auto-fetch newly saved clips when a job completes
+          for (const [jid, job] of Object.entries(window.activeJobs)) {
+            if (job.status === "completed" && (!prevJobs[jid] || prevJobs[jid].status !== "completed")) {
+              fetchRecentClips();
+            }
+          }
+
           renderGallery();
 
           if (currentActiveJobId && window.activeJobs[currentActiveJobId]) {
@@ -1264,7 +1273,11 @@
         const emptyMsg = (currentClipFilter === "current" && activeTab)
           ? `No clips captured for #${activeTab} yet.`
           : "No clips captured yet.";
-        container.innerHTML = `<span style="font-size: 11px; color: #64748b;">${emptyMsg}</span>`;
+        const emptyHtml = `<span style="font-size: 11px; color: #64748b;">${emptyMsg}</span>`;
+        if (window._lastGalleryHtml !== emptyHtml) {
+          window._lastGalleryHtml = emptyHtml;
+          container.innerHTML = emptyHtml;
+        }
         return;
       }
 
@@ -1311,7 +1324,11 @@
         </div>
       `).join("");
 
-      container.innerHTML = jobCardsHtml + clipCardsHtml;
+      const fullHtml = jobCardsHtml + clipCardsHtml;
+      if (window._lastGalleryHtml !== fullHtml) {
+        window._lastGalleryHtml = fullHtml;
+        container.innerHTML = fullHtml;
+      }
     }
 
     /* Job Progress Modal Logic */

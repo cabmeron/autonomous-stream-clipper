@@ -135,9 +135,14 @@ class StreamRingBuffer:
         return segments
 
     def get_latest_segment(self) -> Optional[str]:
-        """Returns the path to the newest TS segment in the buffer."""
+        """Returns the newest fully written TS segment in the buffer."""
         segments = self.get_active_segments()
-        return segments[-1] if segments else None
+        if not segments:
+            return None
+        # If multiple segments exist, return the second to last because FFmpeg is actively appending to the last one
+        if len(segments) >= 2:
+            return segments[-2]
+        return segments[-1]
 
     def stop(self):
         """Terminates the process group and wipes temporary video segments."""

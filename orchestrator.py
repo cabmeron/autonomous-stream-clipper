@@ -30,8 +30,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger("orchestrator")
 
-DEBOUNCE_SEC = float(os.getenv("HEURISTIC_DEBOUNCE_SECONDS", "90"))
-POST_DELAY_SEC = float(os.getenv("POST_EVENT_DELAY_SECONDS", "15"))
+DEBOUNCE_SEC = float(os.getenv("HEURISTIC_DEBOUNCE_SECONDS", "30"))
+POST_DELAY_SEC = float(os.getenv("POST_EVENT_DELAY_SECONDS", "10"))
 HTTP_PORT = int(os.getenv("HTTP_PORT", "8000"))
 STORAGE_DIR = os.getenv("STORAGE_DIR", "./storage/clips")
 ENABLE_OCR = os.getenv("OCR_ENABLED", "true").lower() == "true"
@@ -400,8 +400,8 @@ class StreamClipperOrchestrator:
                         continue
                     latest_seg = session.buffer.get_latest_segment()
                     if latest_seg and os.path.exists(latest_seg):
-                        # 1. Analyze audio
-                        audio_res = session.audio_monitor.process_segment(latest_seg)
+                        # Run audio & OCR in worker thread so event loop never blocks
+                        audio_res = await asyncio.to_thread(session.audio_monitor.process_segment, latest_seg)
                         if audio_res:
                             session.extra_telemetry["audio_rms_db"] = audio_res["current_db"]
                             session.extra_telemetry["audio_spike"] = audio_res["is_spiking"]
@@ -410,7 +410,7 @@ class StreamClipperOrchestrator:
 
                         # 2. Analyze OCR
                         if ENABLE_OCR:
-                            ocr_res = session.ocr_engine.process_segment(latest_seg)
+                            ocr_res = await asyncio.to_thread(session.ocr_engine.process_segment, latest_seg)
                             if ocr_res:
                                 if ocr_res["balance"] is not None:
                                     session.extra_telemetry["ocr_balance"] = f"${ocr_res['balance']:,.2f}"
@@ -422,6 +422,10 @@ class StreamClipperOrchestrator:
             await asyncio.sleep(1.0)
 
     async def process_clip_trigger(self, session: StreamSession, context: dict):
+        """Dispatches the full clipping DAG to a worker thread so the asyncio event loop stays responsive."""
+        await asyncio.to_thread(self._execute_clipping_dag, session, context)
+
+    def _execute_clipping_dag(self, session: StreamSession, context: dict):
         """Full clipping DAG for a specific stream session (preserving full original resolution)."""
         active_channel = session.channel
         logger.info("[DAG] Executing clipping pipeline for event: %s on #%s", context.get("trigger_source"), active_channel)
@@ -445,8 +449,8 @@ class StreamClipperOrchestrator:
         try:
             # Step 2: Measure actual available duration of the concatenated slice
             candidate_duration = HardwareRenderEngine.get_duration(candidate_path)
-            if candidate_duration < 15.0:
-                err = f"Insufficient buffered video ({candidate_duration:.1f}s < 15s required)"
+            if candidate_duration < 6.0:
+                err = f"Insufficient buffered video ({candidate_duration:.1f}s < 6s required)"
                 logger.info("[DAG] %s for #%s; waiting for stream buffer to accumulate.", err, active_channel)
                 self.fail_job(job_id, err)
                 return

@@ -33,9 +33,12 @@ class SegmentSlicer:
             return None
 
         segments.sort(key=os.path.getmtime)
+        # If at least 3 segments exist, exclude the in-flight segment currently being appended
+        usable_segments = segments[:-1] if len(segments) >= 3 else segments
+
         # 60s @ 10s per segment = 6 segments
         target_count = max(1, duration_seconds // 10)
-        selected = segments[-target_count:]
+        selected = usable_segments[-target_count:]
 
         os.makedirs(output_dir, exist_ok=True)
         timestamp = int(time.time())
