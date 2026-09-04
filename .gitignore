@@ -1,6 +1,7 @@
 __pycache__/
 *.py[cod]
 *$py.class
+*.pyc
 .pytest_cache/
 .DS_Store
 .env
@@ -8,3 +9,11 @@ __pycache__/
 /storage/clips/thumb_*.jpg
 /storage/clips/clip.mp4
 /storage/clips/test_*.ts
+.env
+.envrc
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
