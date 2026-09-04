@@ -51,6 +51,27 @@ class DatabaseRepository:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_clips_channel ON clips(channel_name);")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_clips_status ON clips(status);")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_clips_created_at ON clips(created_at DESC);")
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS chat_sentiments (
+                    id TEXT PRIMARY KEY,
+                    channel_name TEXT NOT NULL,
+                    window_start REAL NOT NULL,
+                    window_end REAL NOT NULL,
+                    timestamp_str TEXT NOT NULL,
+                    vibe TEXT NOT NULL,
+                    emoji TEXT NOT NULL,
+                    descriptor TEXT NOT NULL,
+                    score REAL DEFAULT 0.0,
+                    velocity REAL DEFAULT 0.0,
+                    message_count INTEGER DEFAULT 0,
+                    top_emotes TEXT DEFAULT '[]',
+                    color TEXT DEFAULT '#64748b',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_sentiments_channel ON chat_sentiments(channel_name);")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_sentiments_created_at ON chat_sentiments(created_at DESC);")
             conn.commit()
         logger.info("[Database] Local SQLite database ready at: %s (WAL mode enabled)", self._sqlite_path)
 
@@ -134,3 +155,61 @@ class DatabaseRepository:
                 cursor.execute("SELECT * FROM clips ORDER BY created_at DESC LIMIT ?", (limit,))
             rows = cursor.fetchall()
             return [dict(r) for r in rows]
+
+    def save_chat_sentiment(self, sentiment_data: dict) -> str:
+        """Persists a 60-second chat sentiment record."""
+        sentiment_id = sentiment_data.get("id") or str(uuid.uuid4())
+        emotes_json = (
+            json.dumps(sentiment_data.get("top_emotes"))
+            if isinstance(sentiment_data.get("top_emotes"), (list, dict))
+            else sentiment_data.get("top_emotes", "[]")
+        )
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO chat_sentiments (
+                    id, channel_name, window_start, window_end, timestamp_str,
+                    vibe, emoji, descriptor, score, velocity, message_count,
+                    top_emotes, color
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                sentiment_id,
+                sentiment_data.get("channel", "").lower(),
+                sentiment_data.get("window_start", 0.0),
+                sentiment_data.get("window_end", 0.0),
+                sentiment_data.get("timestamp_str", ""),
+                sentiment_data.get("vibe", "CHATTING"),
+                sentiment_data.get("emoji", "💬"),
+                sentiment_data.get("descriptor", ""),
+                sentiment_data.get("score", 0.0),
+                sentiment_data.get("velocity", 0.0),
+                sentiment_data.get("message_count", 0),
+                emotes_json,
+                sentiment_data.get("color", "#64748b"),
+            ))
+            conn.commit()
+        return sentiment_id
+
+    def get_recent_sentiments(self, limit: int = 50, channel: Optional[str] = None) -> List[Dict]:
+        """Retrieves recent chat sentiment descriptors, optionally filtered by channel."""
+        with self._get_connection() as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            if channel:
+                cursor.execute(
+                    "SELECT * FROM chat_sentiments WHERE LOWER(channel_name) = ? ORDER BY window_end DESC LIMIT ?",
+                    (channel.lower(), limit),
+                )
+            else:
+                cursor.execute("SELECT * FROM chat_sentiments ORDER BY window_end DESC LIMIT ?", (limit,))
+            rows = cursor.fetchall()
+            results = []
+            for r in rows:
+                d = dict(r)
+                if isinstance(d.get("top_emotes"), str):
+                    try:
+                        d["top_emotes"] = json.loads(d["top_emotes"])
+                    except Exception:
+                        d["top_emotes"] = []
+                results.append(d)
+            return results

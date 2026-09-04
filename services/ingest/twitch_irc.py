@@ -4,7 +4,7 @@ import inspect
 import logging
 import random
 import time
-from typing import Callable, Optional
+from typing import Callable, List, Optional
 import websockets
 
 logger = logging.getLogger(__name__)
@@ -45,6 +45,7 @@ class TwitchChatVelocityEngine:
 
         self.timestamps = deque()
         self.recent_messages = deque(maxlen=50)
+        self.window_messages: list = []
         self.total_messages = 0
         self.running = False
         self.ws = None
@@ -54,6 +55,12 @@ class TwitchChatVelocityEngine:
         self.v_baseline = 0.0   # 60-second window (msgs/sec)
         self.spike_ratio = 1.0
         self.is_spiking = False
+
+    def drain_window_messages(self) -> List[dict]:
+        """Returns and resets the messages collected for the 60-second sentiment analysis window."""
+        msgs = self.window_messages
+        self.window_messages = []
+        return msgs
 
     async def listen(self):
         """Asynchronous listener maintaining an anonymous IRC connection."""
@@ -90,6 +97,9 @@ class TwitchChatVelocityEngine:
                                     self.total_messages += 1
                                     parsed["id"] = self.total_messages
                                     self.recent_messages.append(parsed)
+                                    self.window_messages.append(parsed)
+                                    if len(self.window_messages) > 2000:
+                                        self.window_messages = self.window_messages[-2000:]
             except asyncio.CancelledError:
                 break
             except Exception as err:
