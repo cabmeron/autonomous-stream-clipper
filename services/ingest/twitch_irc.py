@@ -16,6 +16,8 @@ def parse_irc_privmsg(raw_line: str) -> Optional[dict]:
         return None
     try:
         prefix, rest = raw_line.split(" PRIVMSG #", 1)
+        if prefix.startswith("@") and " :" in prefix:
+            prefix = prefix.split(" :", 1)[1]
         user = prefix.lstrip(":").split("!")[0]
         if " :" in rest:
             msg = rest.split(" :", 1)[1]
@@ -43,6 +45,7 @@ class TwitchChatVelocityEngine:
 
         self.timestamps = deque()
         self.recent_messages = deque(maxlen=50)
+        self.total_messages = 0
         self.running = False
         self.ws = None
 
@@ -71,14 +74,22 @@ class TwitchChatVelocityEngine:
 
                     while self.running:
                         raw_msg = await ws.recv()
-                        if "PRIVMSG" in raw_msg:
-                            now = time.time()
-                            self.timestamps.append(now)
-                            parsed = parse_irc_privmsg(raw_msg)
-                            if parsed:
-                                self.recent_messages.append(parsed)
-                        elif raw_msg.startswith("PING"):
-                            await ws.send("PONG :tmi.twitch.tv")
+                        # Split by \r\n to handle multiple IRC commands delivered in a single TCP/WS frame
+                        lines = raw_msg.split("\r\n") if isinstance(raw_msg, str) else [raw_msg]
+                        for line in lines:
+                            line = line.strip()
+                            if not line:
+                                continue
+                            if line.startswith("PING"):
+                                await ws.send("PONG :tmi.twitch.tv")
+                            elif "PRIVMSG" in line:
+                                now = time.time()
+                                self.timestamps.append(now)
+                                parsed = parse_irc_privmsg(line)
+                                if parsed:
+                                    self.total_messages += 1
+                                    parsed["id"] = self.total_messages
+                                    self.recent_messages.append(parsed)
             except asyncio.CancelledError:
                 break
             except Exception as err:
@@ -131,6 +142,7 @@ class TwitchChatVelocityEngine:
             "spike_ratio": self.spike_ratio,
             "is_spiking": self.is_spiking,
             "buffered_messages": count_60,
+            "total_messages": self.total_messages,
             "recent_messages": list(self.recent_messages),
         }
 

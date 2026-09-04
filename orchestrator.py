@@ -167,7 +167,7 @@ class StreamSession:
 
     def get_telemetry(self) -> dict:
         calc = self.chat_engine.recalculate() if self.chat_engine else {
-            "v_instant": 0.0, "v_baseline": 0.0, "spike_ratio": 1.0, "is_spiking": False, "buffered_messages": 0, "recent_messages": []
+            "v_instant": 0.0, "v_baseline": 0.0, "spike_ratio": 1.0, "is_spiking": False, "buffered_messages": 0, "total_messages": 0, "recent_messages": []
         }
         return {
             "channel": self.channel,
@@ -184,6 +184,7 @@ class StreamSession:
             "ocr_multiplier": self.extra_telemetry["ocr_multiplier"],
             "ocr_pnl_delta": self.extra_telemetry["ocr_pnl_delta"],
             "buffered_messages": calc["buffered_messages"],
+            "total_messages": calc.get("total_messages", 0),
             "buffered_segments": self.buffer.get_segment_count() if self.buffer else 0,
         }
 

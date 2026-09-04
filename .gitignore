@@ -33,5 +33,9 @@ Thumbs.db
 /storage/clips/thumb_*.jpg
 /storage/clips/clip.mp4
 /storage/clips/test_*.ts
+storage/*.db-wal
+storage/*.db-shm
+*.db-wal
+*.db-shm
 data/clips/
 data/segments/

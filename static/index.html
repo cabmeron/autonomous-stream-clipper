@@ -962,9 +962,9 @@
     }
 
     let lastChatChannel = null;
-    let lastChatMessageCount = -1;
+    let lastChatMsgSignature = "";
 
-    function renderChatMessages(messages, channel) {
+    function renderChatMessages(messages, channel, totalCount) {
       const chatBox = document.getElementById("chat-messages");
       const countLabel = document.getElementById("chat-count-label");
       if (!chatBox) return;
@@ -974,17 +974,23 @@
           chatBox.innerHTML = `<span style="color: #64748b; font-size: 11px;">Listening to #${channel || "stream"} chat...</span>`;
           if (countLabel) countLabel.innerText = "0 msgs";
           lastChatChannel = channel;
-          lastChatMessageCount = 0;
+          lastChatMsgSignature = "";
         }
         return;
       }
 
-      if (lastChatChannel === channel && lastChatMessageCount === messages.length) return;
+      // Generate a fingerprint based on channel, count, and latest message identity so it updates even when capped at 50 msgs
+      const latestMsg = messages[messages.length - 1];
+      const signature = `${channel}_${messages.length}_${latestMsg?.id || ''}_${latestMsg?.time || ''}_${latestMsg?.user || ''}_${latestMsg?.text || ''}`;
+      if (lastChatChannel === channel && lastChatMsgSignature === signature) return;
       lastChatChannel = channel;
-      lastChatMessageCount = messages.length;
+      lastChatMsgSignature = signature;
 
-      if (countLabel) countLabel.innerText = `${messages.length} msgs`;
-      const isNearBottom = (chatBox.scrollHeight - chatBox.scrollTop - chatBox.clientHeight) < 40;
+      if (countLabel) {
+        const displayTotal = totalCount != null ? totalCount : messages.length;
+        countLabel.innerText = `${displayTotal} msgs`;
+      }
+      const isNearBottom = (chatBox.scrollHeight - chatBox.scrollTop - chatBox.clientHeight) < 50;
 
       chatBox.innerHTML = messages.map(m => `
         <div class="chat-msg">
@@ -1113,7 +1119,7 @@
       }
 
       drawWaveform(data.audio_waveform || []);
-      renderChatMessages(data.recent_messages || [], activeTab);
+      renderChatMessages(data.recent_messages || [], activeTab, data.total_messages != null ? data.total_messages : data.buffered_messages);
     }
 
     async function addStreamSession() {
