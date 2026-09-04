@@ -306,7 +306,7 @@
       bottom: 18px;
       left: 18px;
       right: 18px;
-      height: 200px;
+      height: 140px;
       background: rgba(13, 16, 23, 0.94);
       border: 1px solid rgba(255, 255, 255, 0.12);
       backdrop-filter: blur(14px);
@@ -385,90 +385,6 @@
       pointer-events: none;
       opacity: 0.85;
       border-color: rgba(255, 255, 255, 0.1);
-    }
-
-    /* 60s Chat Sentiment Descriptors Row */
-    .sentiment-section {
-      display: flex;
-      flex-direction: column;
-      margin-bottom: 6px;
-      padding-bottom: 5px;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-    }
-    .sentiment-section-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 3px;
-    }
-    .sentiment-section-title {
-      font-size: 9px;
-      font-weight: 800;
-      letter-spacing: 0.8px;
-      color: #64748b;
-      text-transform: uppercase;
-    }
-    .sentiment-latest-pill {
-      font-size: 9px;
-      font-weight: 700;
-      padding: 1px 8px;
-      border-radius: 10px;
-      background: rgba(255, 255, 255, 0.04);
-      color: #94a3b8;
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      max-width: 420px;
-    }
-    #sentiment-container {
-      display: flex;
-      gap: 8px;
-      align-items: center;
-      overflow-x: auto;
-      height: 36px;
-      min-height: 36px;
-      scrollbar-width: thin;
-    }
-    .sentiment-pill {
-      flex: 0 0 auto;
-      height: 30px;
-      padding: 3px 10px;
-      border-radius: 7px;
-      background: rgba(255, 255, 255, 0.03);
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      display: flex;
-      align-items: center;
-      gap: 7px;
-      cursor: default;
-      transition: all 0.2s ease;
-      white-space: nowrap;
-    }
-    .sentiment-pill:hover {
-      background: rgba(255, 255, 255, 0.07);
-      border-color: rgba(255, 255, 255, 0.2);
-      transform: translateY(-1px);
-    }
-    .sentiment-pill-time {
-      font-family: "SFMono-Regular", Consolas, Menlo, monospace;
-      font-size: 9px;
-      color: #94a3b8;
-      background: rgba(0, 0, 0, 0.4);
-      padding: 1px 5px;
-      border-radius: 4px;
-    }
-    .sentiment-pill-tag {
-      font-size: 10px;
-      font-weight: 800;
-    }
-    .sentiment-pill-desc {
-      font-size: 10px;
-      color: #cbd5e1;
-      font-weight: 500;
-    }
-    .sentiment-pill-meta {
-      font-size: 9px;
-      color: #64748b;
     }
 
     #clip-container {
@@ -922,20 +838,6 @@
         </div>
       </div>
 
-      <!-- 60s Sentiment Timeline Row -->
-      <div class="sentiment-section">
-        <div class="sentiment-section-header">
-          <div style="display: flex; align-items: center; gap: 6px;">
-            <span class="sentiment-section-title">60S CHAT SENTIMENT</span>
-            <span id="sentiment-count-badge" style="font-size: 9px; color: #64748b;">(0)</span>
-          </div>
-          <span id="sentiment-latest-badge" class="sentiment-latest-pill">Listening for 60s window...</span>
-        </div>
-        <div id="sentiment-container">
-          <span style="font-size: 11px; color: #64748b;">Waiting for 60-second chat analysis...</span>
-        </div>
-      </div>
-
       <div id="clip-container">
         <span style="font-size: 11px; color: #64748b;">No clips captured yet.</span>
       </div>
@@ -1161,7 +1063,6 @@
         drawWaveform([]);
         renderChatMessages([], null);
         renderGallery();
-        renderSentiments();
         return;
       }
 
@@ -1210,7 +1111,6 @@
       updateActiveHUD();
       drawChart();
       fetchRecentClips();
-      fetchSentiments();
     }
 
     function createTwitchPlayer(channel) {
@@ -1309,7 +1209,6 @@
       document.getElementById("filter-current-btn").className = `gallery-filter-pill ${filterType === 'current' ? 'active' : ''}`;
       document.getElementById("filter-all-btn").className = `gallery-filter-pill ${filterType === 'all' ? 'active' : ''}`;
       fetchRecentClips();
-      fetchSentiments();
     }
 
     let ws = null;
@@ -1371,7 +1270,6 @@
               updateActiveHUD();
               drawChart();
             }
-            renderSentiments();
           }
 
           // Real-time active clipping jobs
@@ -1403,7 +1301,6 @@
     }
     initWebSocket();
     fetchRecentClips();
-    fetchSentiments();
 
     async function fetchRecentClips() {
       try {
@@ -1420,87 +1317,6 @@
       } catch (err) {
         console.error("Failed to load clips:", err);
       }
-    }
-
-    window.allSentiments = [];
-
-    async function fetchSentiments() {
-      try {
-        let url = "/api/sentiments?limit=50";
-        if (currentClipFilter === "current" && activeTab) {
-          url += `&channel=${encodeURIComponent(activeTab)}`;
-        }
-        const res = await fetch(url);
-        if (res.ok) {
-          window.allSentiments = await res.json();
-          renderSentiments();
-        }
-      } catch (err) {
-        console.error("Failed to load sentiments:", err);
-      }
-    }
-
-    function renderSentiments() {
-      const container = document.getElementById("sentiment-container");
-      const latestBadge = document.getElementById("sentiment-latest-badge");
-      const countBadge = document.getElementById("sentiment-count-badge");
-      if (!container) return;
-
-      let list = [];
-      if (currentClipFilter === "current" && activeTab) {
-        const sessionData = activeSessions[activeTab];
-        if (sessionData && sessionData.recent_sentiments && sessionData.recent_sentiments.length > 0) {
-          list = sessionData.recent_sentiments;
-        } else {
-          list = (window.allSentiments || []).filter(s => (s.channel_name === activeTab || s.channel === activeTab));
-        }
-      } else {
-        const sessionSentiments = Object.values(activeSessions).flatMap(s => s.recent_sentiments || []);
-        const map = new Map();
-        [...sessionSentiments, ...(window.allSentiments || [])].forEach(s => {
-          const sid = s.id || `${s.window_start}_${s.channel || s.channel_name}`;
-          if (!map.has(sid)) map.set(sid, s);
-        });
-        list = Array.from(map.values()).sort((a, b) => (b.window_end || 0) - (a.window_end || 0));
-      }
-
-      if (countBadge) countBadge.innerText = `(${list.length})`;
-
-      if (list.length === 0) {
-        const emptyMsg = (currentClipFilter === "current" && activeTab)
-          ? `Waiting for #${activeTab} 60s chat sentiment analysis...`
-          : "No 60-second chat sentiment windows recorded yet.";
-        container.innerHTML = `<span style="font-size: 11px; color: #64748b;">${emptyMsg}</span>`;
-        if (latestBadge) {
-          latestBadge.innerText = "Listening for 60s window...";
-          latestBadge.style.color = "#94a3b8";
-          latestBadge.style.borderColor = "rgba(255, 255, 255, 0.08)";
-        }
-        return;
-      }
-
-      const newest = list[0];
-      if (latestBadge && newest) {
-        latestBadge.innerText = newest.descriptor;
-        latestBadge.style.color = newest.color || "#38bdf8";
-        latestBadge.style.borderColor = newest.color || "rgba(56, 189, 248, 0.4)";
-      }
-
-      container.innerHTML = list.map(item => {
-        const color = item.color || "#64748b";
-        const ch = item.channel || item.channel_name || "";
-        const chTag = (currentClipFilter === "all" && ch) ? `#${ch.toUpperCase()} ` : "";
-        const topEmotes = Array.isArray(item.top_emotes) ? item.top_emotes.join(", ") : "";
-        const tooltip = `[${item.timestamp_str}] #${ch}\nVibe: ${item.vibe}\nVelocity: ${item.velocity} msg/s (${item.message_count} msgs)\nTop Emotes: ${topEmotes || 'None'}\nScore: ${item.score}`;
-        return `
-          <div class="sentiment-pill" style="border-left: 3px solid ${color};" title="${escapeHtml(tooltip)}">
-            <span class="sentiment-pill-time">${item.timestamp_str}</span>
-            <span class="sentiment-pill-tag" style="color: ${color};">${item.emoji || ''} ${chTag}${item.vibe}</span>
-            <span class="sentiment-pill-desc">${escapeHtml(item.descriptor)}</span>
-            <span class="sentiment-pill-meta">${item.message_count} msgs</span>
-          </div>
-        `;
-      }).join("");
     }
 
     function renderGallery() {

@@ -16,7 +16,6 @@ from services.ingest.twitch_irc import TwitchChatVelocityEngine
 from services.heuristics.audio_monitor import AudioDecibelMonitor
 from services.heuristics.ocr_engine import BoundedRegionOCR
 from services.heuristics.gate_evaluator import GateEvaluator
-from services.heuristics.chat_sentiment import ChatSentimentAnalyzer
 from services.processor.slicer import SegmentSlicer
 from services.processor.transcriber import AudioTranscriber
 from services.processor.boundary_ai import BoundaryOptimizer
@@ -97,17 +96,6 @@ class StreamSession:
             "ocr_pnl_delta": 0.0,
         }
         self.last_analyzed_segment: Optional[str] = None
-        self.sentiment_analyzer = ChatSentimentAnalyzer()
-        self.last_sentiment_time = time.time()
-        self.recent_sentiments = deque(maxlen=50)
-
-        # Pre-load saved sentiments from DB if present
-        try:
-            saved_sentiments = self.orchestrator.db.get_recent_sentiments(channel=self.channel, limit=30)
-            for s in reversed(saved_sentiments):
-                self.recent_sentiments.append(s)
-        except Exception:
-            pass
 
     def start(self, loop: asyncio.AbstractEventLoop):
         """Starts HLS ingestion and connects to IRC WebSocket."""
@@ -192,7 +180,6 @@ class StreamSession:
             "spike_ratio": calc["spike_ratio"],
             "is_spiking": calc["is_spiking"],
             "recent_messages": calc.get("recent_messages", []),
-            "recent_sentiments": list(self.recent_sentiments),
             "audio_rms_db": self.extra_telemetry["audio_rms_db"],
             "audio_spike": self.extra_telemetry["audio_spike"],
             "audio_waveform": self.extra_telemetry.get("audio_waveform", []),
@@ -474,30 +461,7 @@ class StreamClipperOrchestrator:
         while self.running:
             try:
                 for session in list(self.sessions.values()):
-                    # 1. 60-Second Chat Sentiment Analysis Cycle
-                    now = time.time()
-                    if now - session.last_sentiment_time >= 60.0:
-                        w_start = session.last_sentiment_time
-                        session.last_sentiment_time = now
-                        if session.chat_engine:
-                            msgs = session.chat_engine.drain_window_messages()
-                            sentiment = session.sentiment_analyzer.analyze_window(
-                                messages=msgs,
-                                channel=session.channel,
-                                window_start=w_start,
-                                window_end=now,
-                            )
-                            self.db.save_chat_sentiment(sentiment)
-                            session.recent_sentiments.append(sentiment)
-                            logger.info(
-                                "[Session:%s][Sentiment60s] %s (%d msgs, score=%.2f)",
-                                session.channel,
-                                sentiment["descriptor"],
-                                sentiment["message_count"],
-                                sentiment["score"],
-                            )
-
-                    # 2. Segment Heuristics (Audio & OCR)
+                    # Segment Heuristics (Audio & OCR)
                     if not session.buffer:
                         continue
                     latest_seg = session.buffer.get_latest_segment()
@@ -776,13 +740,6 @@ class StreamClipperOrchestrator:
                 return web.json_response({"error": "Job not found"}, status=404)
             return web.json_response(job)
 
-        # 60s Chat Sentiment Descriptors API
-        async def get_sentiments_handler(request):
-            channel_filter = request.query.get("channel")
-            limit = int(request.query.get("limit", 50))
-            sentiments = self.db.get_recent_sentiments(limit=limit, channel=channel_filter)
-            return web.json_response(sentiments)
-
         # Manual Clip Trigger APIs (Newest 60 Seconds from RAM Buffer)
         async def post_manual_clip_handler(request):
             channel = request.match_info["channel"]
@@ -825,7 +782,6 @@ class StreamClipperOrchestrator:
         app.router.add_delete("/api/clips/{id}", delete_clip_handler)
         app.router.add_post("/api/clips/{id}/status", post_clip_status_handler)
 
-        app.router.add_get("/api/sentiments", get_sentiments_handler)
         app.router.add_get("/api/jobs", get_jobs_handler)
         app.router.add_get("/api/jobs/{id}", get_job_detail_handler)
 
