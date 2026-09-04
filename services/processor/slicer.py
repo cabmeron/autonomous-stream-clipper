@@ -44,13 +44,21 @@ class SegmentSlicer:
         timestamp = int(time.time())
         output_file = os.path.join(output_dir, f"raw_{channel_clean}_{timestamp}.mp4")
 
-        # Build FFmpeg concat list file
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
-            for seg in selected:
-                f.write(f"file '{os.path.abspath(seg)}'\n")
-            concat_list = f.name
-
+        # Copy selected segments to temporary staging directory to prevent ring-buffer wrap-around race condition
+        staging_dir = tempfile.mkdtemp(prefix=f"slice_stage_{channel_clean}_")
+        concat_list = None
         try:
+            staged_segments = []
+            for i, seg in enumerate(selected):
+                dst = os.path.join(staging_dir, f"part_{i:02d}.ts")
+                shutil.copy2(seg, dst)
+                staged_segments.append(dst)
+
+            with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
+                for seg in staged_segments:
+                    f.write(f"file '{os.path.abspath(seg)}'\n")
+                concat_list = f.name
+
             cmd = [
                 "ffmpeg",
                 "-hide_banner",
@@ -68,8 +76,9 @@ class SegmentSlicer:
             logger.error("[Slicer] Failed to concatenate segments: %s", e)
             return None
         finally:
-            if os.path.exists(concat_list):
+            if concat_list and os.path.exists(concat_list):
                 try:
                     os.remove(concat_list)
                 except OSError:
                     pass
+            shutil.rmtree(staging_dir, ignore_errors=True)

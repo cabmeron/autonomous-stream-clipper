@@ -4,6 +4,7 @@ import logging
 import os
 import signal
 import sys
+import threading
 import time
 from typing import Dict, List, Optional
 from dotenv import load_dotenv
@@ -93,6 +94,7 @@ class StreamSession:
             "ocr_multiplier": "1.0x",
             "ocr_pnl_delta": 0.0,
         }
+        self.last_analyzed_segment: Optional[str] = None
 
     def start(self, loop: asyncio.AbstractEventLoop):
         """Starts HLS ingestion and connects to IRC WebSocket."""
@@ -182,7 +184,7 @@ class StreamSession:
             "ocr_multiplier": self.extra_telemetry["ocr_multiplier"],
             "ocr_pnl_delta": self.extra_telemetry["ocr_pnl_delta"],
             "buffered_messages": calc["buffered_messages"],
-            "buffered_segments": len(self.buffer.get_active_segments()) if self.buffer else 0,
+            "buffered_segments": self.buffer.get_segment_count() if self.buffer else 0,
         }
 
 
@@ -217,6 +219,7 @@ class StreamClipperOrchestrator:
         # 2. Processor Pipeline (100% Local)
         self.transcriber = AudioTranscriber()
         self.boundary_ai = BoundaryOptimizer()
+        self.transcription_lock = threading.Lock()
 
         # Registry of active clipping pipeline jobs: job_id -> job_dict
         self.active_jobs: Dict[str, dict] = {}
@@ -399,7 +402,8 @@ class StreamClipperOrchestrator:
                     if not session.buffer:
                         continue
                     latest_seg = session.buffer.get_latest_segment()
-                    if latest_seg and os.path.exists(latest_seg):
+                    if latest_seg and latest_seg != session.last_analyzed_segment and os.path.exists(latest_seg):
+                        session.last_analyzed_segment = latest_seg
                         # Run audio & OCR in worker thread so event loop never blocks
                         audio_res = await asyncio.to_thread(session.audio_monitor.process_segment, latest_seg)
                         if audio_res:
@@ -430,6 +434,9 @@ class StreamClipperOrchestrator:
         active_channel = session.channel
         logger.info("[DAG] Executing clipping pipeline for event: %s on #%s", context.get("trigger_source"), active_channel)
         timestamp = int(time.time())
+        candidate_path = None
+        out_video = None
+        out_thumb = None
 
         job_id = context.get("job_id")
         if not job_id:
@@ -463,7 +470,8 @@ class StreamClipperOrchestrator:
 
             # Step 3: Word-level speech transcription (faster-whisper)
             self.update_job_step(job_id, "transcribe", "running", 45, log_msg="Transcribing speech with local faster-whisper (int8)...")
-            words = self.transcriber.transcribe_words(candidate_path)
+            with self.transcription_lock:
+                words = self.transcriber.transcribe_words(candidate_path)
             self.update_job_step(
                 job_id, "transcribe", "done", 60,
                 detail=f"{len(words)} words recognized",
@@ -571,11 +579,12 @@ class StreamClipperOrchestrator:
             logger.error("[DAG] Error executing clipping pipeline for #%s: %s", active_channel, err, exc_info=True)
             self.fail_job(job_id, str(err))
         finally:
-            if os.path.exists(candidate_path):
-                try:
-                    os.remove(candidate_path)
-                except OSError:
-                    pass
+            for p in (candidate_path, out_video, out_thumb):
+                if p and os.path.exists(p):
+                    try:
+                        os.remove(p)
+                    except OSError:
+                        pass
 
     async def start_local_http_server(self):
         """Starts a native async aiohttp web server serving the HUD client, local clips, and REST APIs."""

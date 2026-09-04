@@ -32,10 +32,14 @@ def notify_new_clip(clip_summary: dict):
 
 
 async def broadcast_loop():
-    """Broadcasts multi-session telemetry metrics to all connected clients at 10 Hz (100ms)."""
+    """Broadcasts multi-session telemetry metrics to all connected clients."""
     global recent_clip_notification
     while True:
         try:
+            if not CLIENTS:
+                await asyncio.sleep(0.25)
+                continue
+
             sessions_data = {}
             if sessions_telemetry_provider:
                 try:
@@ -60,18 +64,17 @@ async def broadcast_loop():
             })
 
             # Clear one-time notification after broadcasting to active clients
-            if CLIENTS and recent_clip_notification:
+            if recent_clip_notification:
                 recent_clip_notification = None
 
-            if CLIENTS:
-                await asyncio.gather(
-                    *[c.send(payload) for c in list(CLIENTS)],
-                    return_exceptions=True,
-                )
+            await asyncio.gather(
+                *[c.send(payload) for c in list(CLIENTS)],
+                return_exceptions=True,
+            )
         except Exception as e:
             logger.debug("[Telemetry] Broadcast loop exception: %s", e)
 
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(0.2)
 
 
 async def ws_handler(websocket):
@@ -81,7 +84,7 @@ async def ws_handler(websocket):
     try:
         await websocket.wait_closed()
     finally:
-        CLIENTS.remove(websocket)
+        CLIENTS.discard(websocket)
         logger.info("[Telemetry] Client disconnected (%d total)", len(CLIENTS))
 
 

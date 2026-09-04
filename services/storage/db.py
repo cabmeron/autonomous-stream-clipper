@@ -18,9 +18,15 @@ class DatabaseRepository:
         os.makedirs(os.path.dirname(self._sqlite_path), exist_ok=True)
         self._init_sqlite()
 
+    def _get_connection(self) -> sqlite3.Connection:
+        """Creates an SQLite connection with 5.0s busy timeout and WAL support."""
+        return sqlite3.connect(self._sqlite_path, timeout=5.0)
+
     def _init_sqlite(self):
-        with sqlite3.connect(self._sqlite_path) as conn:
+        with self._get_connection() as conn:
             cursor = conn.cursor()
+            cursor.execute("PRAGMA journal_mode=WAL;")
+            cursor.execute("PRAGMA synchronous=NORMAL;")
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS clips (
                     id TEXT PRIMARY KEY,
@@ -46,7 +52,7 @@ class DatabaseRepository:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_clips_status ON clips(status);")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_clips_created_at ON clips(created_at DESC);")
             conn.commit()
-        logger.info("[Database] Local SQLite database ready at: %s", self._sqlite_path)
+        logger.info("[Database] Local SQLite database ready at: %s (WAL mode enabled)", self._sqlite_path)
 
     def save_clip(self, clip_data: dict) -> str:
         """Saves a new clip into the SQLite database."""
@@ -57,7 +63,7 @@ class DatabaseRepository:
             else clip_data.get("transcript_json", "[]")
         )
 
-        with sqlite3.connect(self._sqlite_path) as conn:
+        with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 INSERT INTO clips (
@@ -91,7 +97,7 @@ class DatabaseRepository:
 
     def get_clip(self, clip_id: str) -> Optional[Dict]:
         """Retrieves a single clip record by ID."""
-        with sqlite3.connect(self._sqlite_path) as conn:
+        with self._get_connection() as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM clips WHERE id = ?", (clip_id,))
@@ -100,7 +106,7 @@ class DatabaseRepository:
 
     def delete_clip(self, clip_id: str) -> bool:
         """Deletes a clip record from the database."""
-        with sqlite3.connect(self._sqlite_path) as conn:
+        with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("DELETE FROM clips WHERE id = ?", (clip_id,))
             conn.commit()
@@ -108,7 +114,7 @@ class DatabaseRepository:
 
     def update_clip_status(self, clip_id: str, new_status: str) -> bool:
         """Updates the status of a clip (e.g. 'approved', 'rejected')."""
-        with sqlite3.connect(self._sqlite_path) as conn:
+        with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("UPDATE clips SET status = ? WHERE id = ?", (new_status, clip_id))
             conn.commit()
@@ -116,7 +122,7 @@ class DatabaseRepository:
 
     def get_recent_clips(self, limit: int = 50, channel: Optional[str] = None) -> List[Dict]:
         """Retrieves recent clips, optionally filtered by channel name."""
-        with sqlite3.connect(self._sqlite_path) as conn:
+        with self._get_connection() as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
             if channel:

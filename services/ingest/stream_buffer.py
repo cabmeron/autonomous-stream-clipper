@@ -126,6 +126,16 @@ class StreamRingBuffer:
         """Returns True if the ingestion pipeline is actively running."""
         return self.process is not None and self.process.poll() is None
 
+    def get_segment_count(self) -> int:
+        """Returns the count of buffered TS segments without sorting or stat calls."""
+        if not os.path.exists(self.shm_dir):
+            return 0
+        try:
+            with os.scandir(self.shm_dir) as it:
+                return sum(1 for entry in it if entry.name.startswith("seg_") and entry.name.endswith(".ts"))
+        except OSError:
+            return 0
+
     def get_active_segments(self) -> List[str]:
         """Returns all existing TS segments ordered chronologically by modification time."""
         if not os.path.exists(self.shm_dir):

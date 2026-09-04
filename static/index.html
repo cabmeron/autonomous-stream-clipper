@@ -1163,69 +1163,95 @@
       fetchRecentClips();
     }
 
-    const ws = new WebSocket(`ws://${window.location.hostname || "localhost"}:8765`);
-    ws.onmessage = (evt) => {
-      try {
-        const msg = JSON.parse(evt.data);
-        if (msg.sessions) {
-          for (const [ch, sData] of Object.entries(msg.sessions)) {
-            activeSessions[ch] = sData;
-            if (!channelHistories[ch]) {
-              channelHistories[ch] = new Array(50).fill(0);
-            }
-            channelHistories[ch].push(sData.v_instant || 0);
-            channelHistories[ch].shift();
-          }
+    let ws = null;
+    let wsReconnectTimeout = null;
 
-          let channelsChanged = false;
-          for (const ch of Object.keys(activeSessions)) {
-            if (!msg.sessions[ch]) {
-              delete activeSessions[ch];
+    function initWebSocket() {
+      if (wsReconnectTimeout) {
+        clearTimeout(wsReconnectTimeout);
+        wsReconnectTimeout = null;
+      }
+
+      ws = new WebSocket(`ws://${window.location.hostname || "localhost"}:8765`);
+
+      ws.onopen = () => {
+        console.log("[HUD] WebSocket connected to telemetry server.");
+      };
+
+      ws.onclose = () => {
+        console.warn("[HUD] WebSocket disconnected, reconnecting in 2s...");
+        wsReconnectTimeout = setTimeout(initWebSocket, 2000);
+      };
+
+      ws.onerror = (err) => {
+        console.error("[HUD] WebSocket error:", err);
+        try { ws.close(); } catch (e) {}
+      };
+
+      ws.onmessage = (evt) => {
+        try {
+          const msg = JSON.parse(evt.data);
+          if (msg.sessions) {
+            for (const [ch, sData] of Object.entries(msg.sessions)) {
+              activeSessions[ch] = sData;
+              if (!channelHistories[ch]) {
+                channelHistories[ch] = new Array(50).fill(0);
+              }
+              channelHistories[ch].push(sData.v_instant || 0);
+              channelHistories[ch].shift();
+            }
+
+            let channelsChanged = false;
+            for (const ch of Object.keys(activeSessions)) {
+              if (!msg.sessions[ch]) {
+                delete activeSessions[ch];
+                channelsChanged = true;
+              }
+            }
+            if (Object.keys(msg.sessions).length !== Object.keys(activeSessions).length) {
               channelsChanged = true;
             }
-          }
-          if (Object.keys(msg.sessions).length !== Object.keys(activeSessions).length) {
-            channelsChanged = true;
-          }
 
-          const currentSpikeKey = Object.entries(activeSessions).map(([k, v]) => `${k}:${Boolean(v.is_spiking || v.audio_spike)}`).join(",");
-          if (channelsChanged || window._lastSpikeKey !== currentSpikeKey) {
-            window._lastSpikeKey = currentSpikeKey;
-            renderTabs();
-          }
+            const currentSpikeKey = Object.entries(activeSessions).map(([k, v]) => `${k}:${Boolean(v.is_spiking || v.audio_spike)}`).join(",");
+            if (channelsChanged || window._lastSpikeKey !== currentSpikeKey) {
+              window._lastSpikeKey = currentSpikeKey;
+              renderTabs();
+            }
 
-          if (activeTab && activeSessions[activeTab]) {
-            updateActiveHUD();
-            drawChart();
-          }
-        }
-
-        // Real-time active clipping jobs
-        if (msg.active_jobs !== undefined) {
-          const prevJobs = window.activeJobs || {};
-          window.activeJobs = msg.active_jobs || {};
-
-          // Auto-fetch newly saved clips when a job completes
-          for (const [jid, job] of Object.entries(window.activeJobs)) {
-            if (job.status === "completed" && (!prevJobs[jid] || prevJobs[jid].status !== "completed")) {
-              fetchRecentClips();
+            if (activeTab && activeSessions[activeTab]) {
+              updateActiveHUD();
+              drawChart();
             }
           }
 
-          renderGallery();
+          // Real-time active clipping jobs
+          if (msg.active_jobs !== undefined) {
+            const prevJobs = window.activeJobs || {};
+            window.activeJobs = msg.active_jobs || {};
 
-          if (currentActiveJobId && window.activeJobs[currentActiveJobId]) {
-            renderJobModal(window.activeJobs[currentActiveJobId]);
+            // Auto-fetch newly saved clips when a job completes
+            for (const [jid, job] of Object.entries(window.activeJobs)) {
+              if (job.status === "completed" && (!prevJobs[jid] || prevJobs[jid].status !== "completed")) {
+                fetchRecentClips();
+              }
+            }
+
+            renderGallery();
+
+            if (currentActiveJobId && window.activeJobs[currentActiveJobId]) {
+              renderJobModal(window.activeJobs[currentActiveJobId]);
+            }
           }
-        }
 
-        if (msg.recent_clip) {
-          fetchRecentClips();
+          if (msg.recent_clip) {
+            fetchRecentClips();
+          }
+        } catch (err) {
+          console.error("Telemetry error:", err);
         }
-      } catch (err) {
-        console.error("Telemetry error:", err);
-      }
-    };
+      };
+    }
+    initWebSocket();
 
     async function fetchRecentClips() {
       try {
