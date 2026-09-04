@@ -91,3 +91,35 @@ def test_render_clean_raw_video(tmp_path):
     assert success is True
     assert os.path.exists(out_mp4)
     assert os.path.getsize(out_mp4) > 0
+
+
+def test_segment_slicer_extract_window(tmp_path):
+    from services.processor.slicer import SegmentSlicer
+
+    shm_base = tmp_path / "shm"
+    stream_dir = shm_base / "streamer"
+    stream_dir.mkdir(parents=True)
+    out_dir = tmp_path / "candidates"
+
+    # Create 3 synthetic TS segments
+    for i in range(3):
+        ts_path = str(stream_dir / f"seg_{i:03d}.ts")
+        cmd = [
+            "ffmpeg", "-hide_banner", "-loglevel", "error",
+            "-f", "lavfi", "-i", "testsrc=size=320x240:rate=15:duration=1",
+            "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=16000:duration=1",
+            "-c:v", "libx264", "-c:a", "aac", "-y", ts_path,
+        ]
+        subprocess.run(cmd, check=True)
+
+    result_file = SegmentSlicer.extract_window(
+        channel="streamer",
+        duration_seconds=20,
+        output_dir=str(out_dir),
+        shm_base=str(shm_base),
+    )
+
+    assert result_file is not None
+    assert os.path.exists(result_file)
+    assert os.path.getsize(result_file) > 0
+

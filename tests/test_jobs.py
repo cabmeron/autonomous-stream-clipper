@@ -106,3 +106,20 @@ async def test_orchestrator_trigger_manual_clip(monkeypatch):
     # Cleanup session
     await orch.remove_session("testclip")
 
+
+def test_orchestrator_job_failure_updates_step_and_status():
+    orch = StreamClipperOrchestrator()
+    job_id = orch.create_job("marlon", {"trigger_source": "manual_trigger", "score": 10})
+
+    orch.update_job_step(job_id, "slicing", "running", 28, log_msg="Concatenating candidate stream slice...")
+    job = orch.active_jobs[job_id]
+    assert job["steps"][2]["status"] == "running"
+
+    orch.fail_job(job_id, "Failed to concatenate segments: missing stream data")
+    assert job["status"] == "failed"
+    assert "Failed to concatenate segments" in job["current_step"]
+    assert job["steps"][2]["status"] == "failed"
+    assert "missing stream data" in job["steps"][2]["detail"]
+    assert any("ERROR:" in l for l in job["logs"])
+
+

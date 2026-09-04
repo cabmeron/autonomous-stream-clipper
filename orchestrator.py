@@ -329,6 +329,11 @@ class StreamClipperOrchestrator:
         job["status"] = "failed"
         job["current_step"] = f"Failed: {error_msg}"
         job["logs"].append(f"[{now_str}] ERROR: {error_msg}")
+        job["updated_at"] = time.time()
+        for s in job.get("steps", []):
+            if s.get("status") == "running":
+                s["status"] = "failed"
+                s["detail"] = error_msg
         logger.error("[Job:%s] Failed: %s", job_id, error_msg)
 
     def get_active_jobs(self) -> Dict[str, dict]:
@@ -496,7 +501,13 @@ class StreamClipperOrchestrator:
 
     async def process_clip_trigger(self, session: StreamSession, context: dict):
         """Dispatches the full clipping DAG to a worker thread so the asyncio event loop stays responsive."""
-        await asyncio.to_thread(self._execute_clipping_dag, session, context)
+        job_id = context.get("job_id")
+        try:
+            await asyncio.to_thread(self._execute_clipping_dag, session, context)
+        except Exception as e:
+            logger.error("[Orchestrator] process_clip_trigger failed for #%s (job %s): %s", session.channel, job_id, e, exc_info=True)
+            if job_id:
+                self.fail_job(job_id, str(e))
 
     def _execute_clipping_dag(self, session: StreamSession, context: dict):
         """Full clipping DAG for a specific stream session (preserving full original resolution)."""
@@ -511,18 +522,17 @@ class StreamClipperOrchestrator:
         if not job_id:
             job_id = self.create_job(active_channel, context)
 
-        self.update_job_step(job_id, "delay", "done", 22, log_msg="Post-event reaction buffer accumulation completed.")
-        self.update_job_step(job_id, "slicing", "running", 28, log_msg="Concatenating candidate stream slice from RAM ring buffer...")
-
-        # Step 1: Zero-copy concatenation of candidate slice
-        candidate_path = SegmentSlicer.extract_window(active_channel, duration_seconds=60)
-        if not candidate_path or not os.path.exists(candidate_path):
-            err = f"Failed to extract candidate slice from RAM ring buffer for #{active_channel}"
-            logger.error("[DAG] %s; aborting clip pipeline.", err)
-            self.fail_job(job_id, err)
-            return
-
         try:
+            self.update_job_step(job_id, "delay", "done", 22, log_msg="Post-event reaction buffer accumulation completed.")
+            self.update_job_step(job_id, "slicing", "running", 28, log_msg="Concatenating candidate stream slice from RAM ring buffer...")
+
+            # Step 1: Zero-copy concatenation of candidate slice
+            candidate_path = SegmentSlicer.extract_window(active_channel, duration_seconds=60)
+            if not candidate_path or not os.path.exists(candidate_path):
+                err = f"Failed to extract candidate slice from RAM ring buffer for #{active_channel}"
+                logger.error("[DAG] %s; aborting clip pipeline.", err)
+                self.fail_job(job_id, err)
+                return
             # Step 2: Measure actual available duration of the concatenated slice
             candidate_duration = HardwareRenderEngine.get_duration(candidate_path)
             if candidate_duration < 6.0:

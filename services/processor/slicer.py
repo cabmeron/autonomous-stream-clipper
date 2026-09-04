@@ -1,6 +1,7 @@
 import glob
 import logging
 import os
+import shutil
 import subprocess
 import tempfile
 import time
@@ -81,4 +82,6 @@ class SegmentSlicer:
                     os.remove(concat_list)
                 except OSError:
                     pass
-            shutil.rmtree(staging_dir, ignore_errors=True)
+            if staging_dir and os.path.exists(staging_dir):
+                shutil.rmtree(staging_dir, ignore_errors=True)
+
