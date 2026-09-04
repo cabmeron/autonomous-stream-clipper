@@ -112,6 +112,8 @@ class StreamSession:
     def start(self, loop: asyncio.AbstractEventLoop):
         """Starts HLS ingestion and connects to IRC WebSocket."""
         logger.info("[Session:%s] Starting stream buffer and chat listener...", self.channel)
+        self.loop = loop
+        self.gate_evaluator.loop = loop
         self.buffer.start()
         self.chat_task = loop.create_task(self.chat_engine.listen())
 
@@ -249,7 +251,41 @@ class StreamClipperOrchestrator:
         now_str = time.strftime("%H:%M:%S")
         source = context.get("trigger_source", "spike")
         score = context.get("score", 7)
-        delay = context.get("post_event_delay", 15.0)
+        is_manual = (source == "manual_trigger")
+        delay = 0.0 if is_manual else context.get("post_event_delay", POST_DELAY_SEC)
+
+        if is_manual:
+            current_step = "Slicing newest 60s stream buffer..."
+            progress_pct = 25
+            steps = [
+                {"id": "trigger", "name": "Manual Quick Clip Triggered", "status": "done", "detail": "User clicked 'Clip Last 60s'"},
+                {"id": "delay", "name": "Post-Event Delay Buffer", "status": "done", "detail": "Bypassed (instant manual capture)"},
+                {"id": "slicing", "name": "RAM Buffer Slicing", "status": "running", "detail": "Concatenating newest 60s RAM slice"},
+                {"id": "transcribe", "name": "Speech Transcription", "status": "pending", "detail": "faster-whisper word alignment"},
+                {"id": "boundary", "name": "Speech Pause Optimization", "status": "pending", "detail": "Full 60s highlight preserved"},
+                {"id": "render", "name": "Raw Video Extraction", "status": "pending", "detail": "Hardware-accelerated uncropped cut"},
+                {"id": "save", "name": "Storage & Database", "status": "pending", "detail": "Persisting to local disk & gallery"},
+            ]
+            logs = [
+                f"[{now_str}] Manual highlight triggered by user for #{channel}.",
+                f"[{now_str}] Bypassed post-event delay (capturing newest 60s buffer immediately).",
+            ]
+        else:
+            current_step = f"Buffering post-event reaction (+{int(delay)}s)..."
+            progress_pct = 12
+            steps = [
+                {"id": "trigger", "name": "Spike Trigger Activated", "status": "done", "detail": f"Signal: {source} (Score: {score}/10)"},
+                {"id": "delay", "name": "Post-Event Delay Buffer", "status": "running", "detail": f"Capturing +{int(delay)}s reaction window"},
+                {"id": "slicing", "name": "RAM Buffer Slicing", "status": "pending", "detail": "Zero-copy TS slice concatenation"},
+                {"id": "transcribe", "name": "Speech Transcription", "status": "pending", "detail": "faster-whisper word alignment"},
+                {"id": "boundary", "name": "Speech Pause Optimization", "status": "pending", "detail": "Boundary trimming on speech pauses"},
+                {"id": "render", "name": "Raw Video Extraction", "status": "pending", "detail": "Hardware-accelerated uncropped cut"},
+                {"id": "save", "name": "Storage & Database", "status": "pending", "detail": "Persisting to local disk & gallery"},
+            ]
+            logs = [
+                f"[{now_str}] Excitement spike triggered via {source} (Score: {score}/10).",
+                f"[{now_str}] Post-event buffer initiated (+{int(delay)}s reaction capture).",
+            ]
 
         job = {
             "id": job_id,
@@ -259,21 +295,10 @@ class StreamClipperOrchestrator:
             "source": source,
             "created_at": time.time(),
             "updated_at": time.time(),
-            "current_step": f"Buffering post-event reaction (+{int(delay)}s)...",
-            "progress_pct": 12,
-            "steps": [
-                {"id": "trigger", "name": "Spike Trigger Activated", "status": "done", "detail": f"Signal: {source} (Score: {score}/10)"},
-                {"id": "delay", "name": "Post-Event Delay Buffer", "status": "running", "detail": f"Capturing +{int(delay)}s reaction window"},
-                {"id": "slicing", "name": "RAM Buffer Slicing", "status": "pending", "detail": "Zero-copy TS slice concatenation"},
-                {"id": "transcribe", "name": "Speech Transcription", "status": "pending", "detail": "faster-whisper word alignment"},
-                {"id": "boundary", "name": "Speech Pause Optimization", "status": "pending", "detail": "Boundary trimming on speech pauses"},
-                {"id": "render", "name": "Raw Video Extraction", "status": "pending", "detail": "Hardware-accelerated uncropped cut"},
-                {"id": "save", "name": "Storage & Database", "status": "pending", "detail": "Persisting to local disk & gallery"},
-            ],
-            "logs": [
-                f"[{now_str}] Excitement spike triggered via {source} (Score: {score}/10).",
-                f"[{now_str}] Post-event buffer initiated (+{int(delay)}s reaction capture).",
-            ],
+            "current_step": current_step,
+            "progress_pct": progress_pct,
+            "steps": steps,
+            "logs": logs,
         }
         self.active_jobs[job_id] = job
         logger.info("[Job:%s] Created clipping job for #%s (source: %s, score: %d/10)", job_id, channel, source, score)
@@ -523,7 +548,8 @@ class StreamClipperOrchestrator:
             job_id = self.create_job(active_channel, context)
 
         try:
-            self.update_job_step(job_id, "delay", "done", 22, log_msg="Post-event reaction buffer accumulation completed.")
+            if context.get("trigger_source") != "manual_trigger":
+                self.update_job_step(job_id, "delay", "done", 22, log_msg="Post-event reaction buffer accumulation completed.")
             self.update_job_step(job_id, "slicing", "running", 28, log_msg="Concatenating candidate stream slice from RAM ring buffer...")
 
             # Step 1: Zero-copy concatenation of candidate slice
