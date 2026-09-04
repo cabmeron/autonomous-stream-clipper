@@ -352,6 +352,41 @@
       font-weight: 700;
     }
 
+    /* Manual Quick Clip Button */
+    .btn-manual-clip {
+      background: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%);
+      color: #ffffff;
+      border: 1px solid rgba(255, 255, 255, 0.25);
+      padding: 3px 12px;
+      border-radius: 12px;
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.4px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      transition: all 0.2s ease;
+      box-shadow: 0 2px 8px rgba(239, 68, 68, 0.35);
+    }
+    .btn-manual-clip:hover {
+      background: linear-gradient(135deg, #f87171 0%, #dc2626 100%);
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(239, 68, 68, 0.55);
+    }
+    .btn-manual-clip:active {
+      transform: translateY(1px);
+      box-shadow: 0 1px 3px rgba(239, 68, 68, 0.3);
+    }
+    .btn-manual-clip.clipping {
+      background: #334155;
+      box-shadow: none;
+      cursor: wait;
+      pointer-events: none;
+      opacity: 0.85;
+      border-color: rgba(255, 255, 255, 0.1);
+    }
+
     /* 60s Chat Sentiment Descriptors Row */
     .sentiment-section {
       display: flex;
@@ -877,7 +912,11 @@
           <span id="gallery-stream-title" class="gallery-title">CLIPS</span>
           <span id="clip-count-badge" style="font-size: 10px; color: #64748b;">(0)</span>
         </div>
-        <div style="display: flex; gap: 6px;">
+        <div style="display: flex; gap: 6px; align-items: center;">
+          <button id="manual-clip-btn" class="btn-manual-clip" onclick="triggerManualClip()" title="Instantly capture the newest 60 seconds from the active stream buffer">
+            <span style="font-size: 13px;">✂️</span>
+            <span>Clip Last 60s</span>
+          </button>
           <button id="filter-current-btn" class="gallery-filter-pill active" onclick="setClipFilter('current')">Current Stream</button>
           <button id="filter-all-btn" class="gallery-filter-pill" onclick="setClipFilter('all')">All Streams</button>
         </div>
@@ -1548,6 +1587,48 @@
       if (window._lastGalleryHtml !== fullHtml) {
         window._lastGalleryHtml = fullHtml;
         container.innerHTML = fullHtml;
+      }
+    }
+
+    /* Manual Quick Clip (Capture Newest 60s Buffer) */
+    async function triggerManualClip() {
+      const targetChannel = activeTab || Object.keys(activeSessions)[0];
+      if (!targetChannel) {
+        alert("No active stream session available to clip.");
+        return;
+      }
+
+      const btn = document.getElementById("manual-clip-btn");
+      const origHtml = btn ? btn.innerHTML : "";
+      if (btn) {
+        btn.classList.add("clipping");
+        btn.innerHTML = `<span class="pulse-dot" style="background:#fff; width:6px; height:6px;"></span> Slicing 60s...`;
+      }
+
+      try {
+        const resp = await fetch(`/api/sessions/${encodeURIComponent(targetChannel)}/clip`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" }
+        });
+        const data = await resp.json();
+        if (!resp.ok) {
+          throw new Error(data.error || "Failed to trigger manual clip");
+        }
+
+        console.log("[ManualClip] Initiated:", data);
+        if (data.job_id) {
+          openJobModal(data.job_id);
+        }
+      } catch (err) {
+        console.error("[ManualClip] Error:", err);
+        alert(`Could not capture clip: ${err.message}`);
+      } finally {
+        if (btn) {
+          setTimeout(() => {
+            btn.classList.remove("clipping");
+            btn.innerHTML = origHtml;
+          }, 1500);
+        }
       }
     }
 

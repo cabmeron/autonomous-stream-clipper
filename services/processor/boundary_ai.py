@@ -23,6 +23,17 @@ class BoundaryOptimizer:
         pnl = event_context.get("pnl_delta", 0.0)
         source = event_context.get("trigger_source", "chat_spike")
 
+        # For manual trigger, respect user intent to capture the full requested buffer window
+        if source == "manual_trigger":
+            ch = event_context.get("channel", "stream")
+            return {
+                "cut_start": 0.0,
+                "cut_end": round(total_duration, 2),
+                "title": f"Manual Highlight - #{ch.upper()}",
+                "caption": f"Captured manually live from #{ch}! #twitch #highlight",
+                "score": 10,
+            }
+
         # Dynamic title & caption generation
         if mult >= 100.0:
             title = f"INSANE {int(mult)}X MULTIPLIER HIT!"

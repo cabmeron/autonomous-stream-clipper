@@ -71,3 +71,38 @@ def test_gate_evaluator_triggers_job_activation():
     assert len(activated_contexts) == 1
     assert activated_contexts[0]["trigger_source"] == "chat_spike"
     assert activated_contexts[0]["score"] >= 4
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_trigger_manual_clip(monkeypatch):
+    orch = StreamClipperOrchestrator()
+
+    # 1. Error if channel does not exist
+    with pytest.raises(ValueError) as exc:
+        await orch.trigger_manual_clip("nonexistent")
+    assert "not active" in str(exc.value)
+
+    # 2. Add session
+    await orch.add_session("testclip")
+
+    # Mock process_clip_trigger so test doesn't run full ffmpeg pipeline
+    triggered_context = []
+    async def mock_process(session, ctx):
+        triggered_context.append(ctx)
+
+    monkeypatch.setattr(orch, "process_clip_trigger", mock_process)
+
+    # 3. Trigger manual clip
+    res = await orch.trigger_manual_clip("testclip")
+    assert res["success"] is True
+    assert res["channel"] == "testclip"
+    assert res["job_id"] in orch.active_jobs
+
+    job = orch.active_jobs[res["job_id"]]
+    assert job["channel"] == "testclip"
+    assert job["score"] == 10
+    assert job["status"] == "processing"
+
+    # Cleanup session
+    await orch.remove_session("testclip")
+

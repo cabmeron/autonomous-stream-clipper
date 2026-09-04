@@ -11,3 +11,15 @@ def test_boundary_ai_fallback():
     duration = res["cut_end"] - res["cut_start"]
     assert 20.0 <= duration <= 58.0
     assert "150X" in res["title"].upper()
+
+
+def test_boundary_ai_manual_trigger():
+    opt = BoundaryOptimizer()
+    context = {"trigger_source": "manual_trigger", "channel": "shroud", "score": 10}
+    res = opt.find_optimal_cut(words=[], event_context=context, total_duration=60.0)
+
+    assert res["cut_start"] == 0.0
+    assert res["cut_end"] == 60.0
+    assert "SHROUD" in res["title"].upper()
+    assert res["score"] == 10
+

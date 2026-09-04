@@ -408,6 +408,36 @@ class StreamClipperOrchestrator:
         else:
             return await self.add_session(clean)
 
+    async def trigger_manual_clip(self, channel: str) -> dict:
+        """Manually captures the newest 60 seconds from the rolling stream buffer."""
+        clean = channel.lower().lstrip("#").strip()
+        session = self.sessions.get(clean)
+        if not session:
+            raise ValueError(f"Stream #{clean} is not active. Please add or select an active session.")
+
+        context = {
+            "trigger_source": "manual_trigger",
+            "score": 10,
+            "win_multiplier": 1.0,
+            "pnl_delta": 0.0,
+            "channel": clean,
+            "timestamp": time.time(),
+        }
+
+        job_id = self.create_job(clean, context)
+        context["job_id"] = job_id
+
+        # Dispatch clipping DAG in a non-blocking background task
+        asyncio.create_task(self.process_clip_trigger(session, context))
+
+        logger.info("[Orchestrator] Manual 60s clip initiated for #%s (job: %s)", clean, job_id)
+        return {
+            "success": True,
+            "job_id": job_id,
+            "channel": clean,
+            "message": f"Manual 60-second clip initiated for #{clean}",
+        }
+
     async def heuristics_polling_loop(self):
         """Periodically samples the newest video segment for each active session for audio & OCR."""
         logger.info("[Orchestrator] Starting multi-session heuristics polling loop (1 Hz)...")
@@ -717,13 +747,43 @@ class StreamClipperOrchestrator:
             sentiments = self.db.get_recent_sentiments(limit=limit, channel=channel_filter)
             return web.json_response(sentiments)
 
+        # Manual Clip Trigger APIs (Newest 60 Seconds from RAM Buffer)
+        async def post_manual_clip_handler(request):
+            channel = request.match_info["channel"]
+            try:
+                result = await self.trigger_manual_clip(channel)
+                return web.json_response(result)
+            except ValueError as ve:
+                return web.json_response({"error": str(ve)}, status=404)
+            except Exception as ex:
+                logger.error("[LocalServer] Manual clip failed for #%s: %s", channel, ex)
+                return web.json_response({"error": str(ex)}, status=500)
+
+        async def post_clip_current_handler(request):
+            try:
+                body = await request.json() if request.can_read_body else {}
+            except Exception:
+                body = {}
+            target = body.get("channel") or self.channel
+            if not target and self.sessions:
+                target = list(self.sessions.keys())[0]
+            if not target:
+                return web.json_response({"error": "No active stream session to clip."}, status=400)
+            try:
+                result = await self.trigger_manual_clip(target)
+                return web.json_response(result)
+            except Exception as e:
+                return web.json_response({"error": str(e)}, status=400)
+
         app.router.add_get("/", index_handler)
         app.router.add_get("/api/sessions", get_sessions_handler)
         app.router.add_post("/api/sessions", post_session_handler)
         app.router.add_delete("/api/sessions/{channel}", delete_session_handler)
+        app.router.add_post("/api/sessions/{channel}/clip", post_manual_clip_handler)
 
         app.router.add_get("/api/channel", get_channel_handler)
         app.router.add_post("/api/channel", post_channel_handler)
+        app.router.add_post("/api/clip", post_clip_current_handler)
 
         app.router.add_get("/api/clips", get_clips_handler)
         app.router.add_delete("/api/clips/{id}", delete_clip_handler)
