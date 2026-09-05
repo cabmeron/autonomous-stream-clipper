@@ -51,6 +51,21 @@ class DatabaseRepository:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_clips_channel ON clips(channel_name);")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_clips_status ON clips(status);")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_clips_created_at ON clips(created_at DESC);")
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS chat_descriptors (
+                    id TEXT PRIMARY KEY,
+                    channel_name TEXT NOT NULL,
+                    window_start REAL NOT NULL,
+                    window_end REAL NOT NULL,
+                    message_count INTEGER NOT NULL,
+                    description TEXT NOT NULL,
+                    model_name TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_descriptors_channel ON chat_descriptors(channel_name);")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_descriptors_created ON chat_descriptors(created_at DESC);")
             conn.commit()
         logger.info("[Database] Local SQLite database ready at: %s (WAL mode enabled)", self._sqlite_path)
 
@@ -132,6 +147,44 @@ class DatabaseRepository:
                 )
             else:
                 cursor.execute("SELECT * FROM clips ORDER BY created_at DESC LIMIT ?", (limit,))
+            rows = cursor.fetchall()
+            return [dict(r) for r in rows]
+
+    def save_chat_descriptor(self, data: dict) -> str:
+        """Persists a chat state description window into SQLite."""
+        record_id = data.get("id") or str(uuid.uuid4())
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO chat_descriptors (
+                    id, channel_name, window_start, window_end,
+                    message_count, description, model_name
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (
+                record_id,
+                data.get("channel_name", "").lower(),
+                data.get("window_start", 0.0),
+                data.get("window_end", 0.0),
+                data.get("message_count", 0),
+                data.get("description", ""),
+                data.get("model_name", "local_llm"),
+            ))
+            conn.commit()
+        logger.info("[Database] Saved chat descriptor %s for #%s", record_id, data.get("channel_name"))
+        return record_id
+
+    def get_recent_descriptors(self, channel: Optional[str] = None, limit: int = 20) -> List[Dict]:
+        """Retrieves recent chat state descriptions, optionally filtered by channel."""
+        with self._get_connection() as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            if channel:
+                cursor.execute(
+                    "SELECT * FROM chat_descriptors WHERE LOWER(channel_name) = ? ORDER BY created_at DESC LIMIT ?",
+                    (channel.lower(), limit),
+                )
+            else:
+                cursor.execute("SELECT * FROM chat_descriptors ORDER BY created_at DESC LIMIT ?", (limit,))
             rows = cursor.fetchall()
             return [dict(r) for r in rows]
 

@@ -16,6 +16,7 @@ from services.ingest.twitch_irc import TwitchChatVelocityEngine
 from services.heuristics.audio_monitor import AudioDecibelMonitor
 from services.heuristics.ocr_engine import BoundedRegionOCR
 from services.heuristics.gate_evaluator import GateEvaluator
+from services.heuristics.chat_descriptor import LocalChatDescriptorService
 from services.processor.slicer import SegmentSlicer
 from services.processor.transcriber import AudioTranscriber
 from services.processor.boundary_ai import BoundaryOptimizer
@@ -38,6 +39,9 @@ HTTP_PORT = int(os.getenv("HTTP_PORT", "8000"))
 STORAGE_DIR = os.getenv("STORAGE_DIR", "./storage/clips")
 ENABLE_OCR = os.getenv("OCR_ENABLED", "true").lower() == "true"
 ENABLE_BURN_IN_SUBS = os.getenv("ENABLE_BURN_IN_SUBS", "false").lower() == "true"
+DESCRIPTOR_INTERVAL_SEC = int(os.getenv("CHAT_DESCRIPTOR_INTERVAL_SECONDS", "60"))
+LOCAL_LLM_URL = os.getenv("LOCAL_LLM_URL", "http://localhost:11434/v1")
+LOCAL_LLM_MODEL = os.getenv("LOCAL_LLM_MODEL", "llama3.2:1b")
 
 
 class StreamSession:
@@ -85,6 +89,17 @@ class StreamSession:
             debounce_seconds=DEBOUNCE_SEC,
             post_event_delay_seconds=POST_DELAY_SEC,
         )
+
+        # 6. Local Chat State Descriptor Service
+        self.chat_descriptor_service = LocalChatDescriptorService(
+            interval_seconds=DESCRIPTOR_INTERVAL_SEC,
+            gemini_api_key=os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or "",
+            gemini_model=os.getenv("GEMINI_MODEL", "gemini-2.0-flash"),
+            local_api_base_url=LOCAL_LLM_URL,
+            local_model_name=LOCAL_LLM_MODEL,
+        )
+        self.last_descriptor_time: float = time.time()
+        self.latest_description: Optional[dict] = None
 
         # Telemetry metrics
         self.extra_telemetry = {
@@ -189,6 +204,7 @@ class StreamSession:
             "buffered_messages": calc["buffered_messages"],
             "total_messages": calc.get("total_messages", 0),
             "buffered_segments": self.buffer.get_segment_count() if self.buffer else 0,
+            "latest_chat_description": self.latest_description,
         }
 
 
@@ -483,10 +499,41 @@ class StreamClipperOrchestrator:
                                     session.extra_telemetry["ocr_balance"] = f"${ocr_res['balance']:,.2f}"
                                 session.extra_telemetry["ocr_multiplier"] = f"{ocr_res['multiplier']:.1f}x"
                                 session.extra_telemetry["ocr_pnl_delta"] = ocr_res["pnl_delta"]
+
+                    # 3. Chat State Description (every X seconds)
+                    if session.chat_engine and session.chat_descriptor_service.enabled:
+                        now = time.time()
+                        if now - session.last_descriptor_time >= session.chat_descriptor_service.interval_seconds:
+                            session.last_descriptor_time = now
+                            msgs = session.chat_engine.drain_window_messages()
+                            asyncio.create_task(
+                                self._run_chat_descriptor(
+                                    session, msgs, now - session.chat_descriptor_service.interval_seconds, now
+                                )
+                            )
             except Exception as e:
                 logger.debug("[Orchestrator] Polling loop exception: %s", e)
 
             await asyncio.sleep(1.0)
+
+    async def _run_chat_descriptor(self, session: StreamSession, msgs: List[dict], window_start: float, window_end: float):
+        """Asynchronously summarizes chat messages using local LLM and saves to database."""
+        try:
+            result = await session.chat_descriptor_service.describe_chat_window(
+                messages=msgs,
+                channel=session.channel,
+                window_start=window_start,
+                window_end=window_end,
+            )
+            if result:
+                session.latest_description = result
+                await asyncio.to_thread(self.db.save_chat_descriptor, result)
+                logger.info(
+                    "[Session:%s][ChatDescriptor] %s",
+                    session.channel, result.get("description", "")[:120]
+                )
+        except Exception as e:
+            logger.debug("[Session:%s] Chat descriptor error: %s", session.channel, e)
 
     async def process_clip_trigger(self, session: StreamSession, context: dict):
         """Dispatches the full clipping DAG to a worker thread so the asyncio event loop stays responsive."""
@@ -778,12 +825,56 @@ class StreamClipperOrchestrator:
         app.router.add_post("/api/channel", post_channel_handler)
         app.router.add_post("/api/clip", post_clip_current_handler)
 
+        # Chat Descriptors & Settings APIs
+        async def get_descriptors_handler(request):
+            limit = int(request.query.get("limit", 20))
+            channel_filter = request.query.get("channel")
+            descriptors = self.db.get_recent_descriptors(channel=channel_filter, limit=limit)
+            return web.json_response(descriptors)
+
+        async def post_settings_descriptor_handler(request):
+            try:
+                data = await request.json()
+                interval = data.get("interval_seconds")
+                model = data.get("model_name")
+                gemini_key = data.get("gemini_api_key")
+                gemini_model = data.get("gemini_model")
+                enabled = data.get("enabled")
+                channel = data.get("channel")
+
+                target_sessions = [self.sessions[channel]] if (channel and channel in self.sessions) else list(self.sessions.values())
+                for s in target_sessions:
+                    if interval is not None:
+                        s.chat_descriptor_service.interval_seconds = max(10, int(interval))
+                    if model is not None:
+                        s.chat_descriptor_service.local_model_name = str(model)
+                    if gemini_key is not None:
+                        s.chat_descriptor_service.gemini_api_key = str(gemini_key)
+                    if gemini_model is not None:
+                        s.chat_descriptor_service.gemini_model = str(gemini_model)
+                    if enabled is not None:
+                        s.chat_descriptor_service.enabled = bool(enabled)
+                return web.json_response({
+                    "success": True,
+                    "interval_seconds": interval,
+                    "model_name": model,
+                    "gemini_model": gemini_model,
+                    "provider": target_sessions[0].chat_descriptor_service.provider if target_sessions else "unknown",
+                    "enabled": enabled,
+                    "updated_sessions": [s.channel for s in target_sessions],
+                })
+            except Exception as e:
+                return web.json_response({"error": str(e)}, status=400)
+
         app.router.add_get("/api/clips", get_clips_handler)
         app.router.add_delete("/api/clips/{id}", delete_clip_handler)
         app.router.add_post("/api/clips/{id}/status", post_clip_status_handler)
 
         app.router.add_get("/api/jobs", get_jobs_handler)
         app.router.add_get("/api/jobs/{id}", get_job_detail_handler)
+
+        app.router.add_get("/api/descriptors", get_descriptors_handler)
+        app.router.add_post("/api/settings/chat-descriptor", post_settings_descriptor_handler)
 
         # Static mounts
         app.router.add_static("/clips", clips_dir)

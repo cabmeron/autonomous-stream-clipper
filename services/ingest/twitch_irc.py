@@ -45,6 +45,7 @@ class TwitchChatVelocityEngine:
 
         self.timestamps = deque()
         self.recent_messages = deque(maxlen=50)
+        self.window_messages = []
         self.total_messages = 0
         self.running = False
         self.ws = None
@@ -90,6 +91,7 @@ class TwitchChatVelocityEngine:
                                     self.total_messages += 1
                                     parsed["id"] = self.total_messages
                                     self.recent_messages.append(parsed)
+                                    self.window_messages.append(parsed)
             except asyncio.CancelledError:
                 break
             except Exception as err:
@@ -145,6 +147,12 @@ class TwitchChatVelocityEngine:
             "total_messages": self.total_messages,
             "recent_messages": list(self.recent_messages),
         }
+
+    def drain_window_messages(self) -> List[dict]:
+        """Extracts and clears the messages accumulated during the active window."""
+        msgs = list(self.window_messages)
+        self.window_messages.clear()
+        return msgs
 
     def stop(self):
         self.running = False
