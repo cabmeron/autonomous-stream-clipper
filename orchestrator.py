@@ -839,6 +839,7 @@ class StreamClipperOrchestrator:
                 model = data.get("model_name")
                 gemini_key = data.get("gemini_api_key")
                 gemini_model = data.get("gemini_model")
+                timeout_sec = data.get("timeout_seconds")
                 enabled = data.get("enabled")
                 channel = data.get("channel")
 
@@ -846,6 +847,8 @@ class StreamClipperOrchestrator:
                 for s in target_sessions:
                     if interval is not None:
                         s.chat_descriptor_service.interval_seconds = max(10, int(interval))
+                    if timeout_sec is not None:
+                        s.chat_descriptor_service.timeout_seconds = max(5.0, float(timeout_sec))
                     if model is not None:
                         s.chat_descriptor_service.local_model_name = str(model)
                     if gemini_key is not None:
@@ -857,6 +860,7 @@ class StreamClipperOrchestrator:
                 return web.json_response({
                     "success": True,
                     "interval_seconds": interval,
+                    "timeout_seconds": timeout_sec,
                     "model_name": model,
                     "gemini_model": gemini_model,
                     "provider": target_sessions[0].chat_descriptor_service.provider if target_sessions else "unknown",

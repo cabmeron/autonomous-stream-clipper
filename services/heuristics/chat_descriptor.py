@@ -12,6 +12,7 @@ DEFAULT_INTERVAL_SECONDS = int(os.getenv("CHAT_DESCRIPTOR_INTERVAL_SECONDS", "60
 DEFAULT_GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
 DEFAULT_LOCAL_URL = os.getenv("LOCAL_LLM_URL", "http://localhost:11434/v1")
 DEFAULT_LOCAL_MODEL = os.getenv("LOCAL_LLM_MODEL", "llama3.2:1b")
+DEFAULT_TIMEOUT_SECONDS = float(os.getenv("CHAT_DESCRIPTOR_TIMEOUT_SECONDS", "25.0"))
 
 
 class LocalChatDescriptorService:
@@ -24,7 +25,7 @@ class LocalChatDescriptorService:
         gemini_model: str = DEFAULT_GEMINI_MODEL,
         local_api_base_url: str = DEFAULT_LOCAL_URL,
         local_model_name: str = DEFAULT_LOCAL_MODEL,
-        timeout_seconds: float = 10.0,
+        timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
         enabled: bool = True,
     ):
         self.interval_seconds = max(10, interval_seconds)
@@ -43,7 +44,7 @@ class LocalChatDescriptorService:
     def format_prompts(self, messages: List[dict], channel: str, interval: int) -> tuple[str, str]:
         """Formats the system instructions and user chat transcript."""
         count = len(messages)
-        sampled = messages[-100:] if count > 100 else messages
+        sampled = messages[-45:] if count > 45 else messages
 
         formatted_lines = [f"- {m.get('user', 'anon')}: {m.get('text', '')}" for m in sampled]
         messages_text = "\n".join(formatted_lines)
