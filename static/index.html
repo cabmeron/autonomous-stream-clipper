@@ -272,13 +272,15 @@
     }
 
     /* Apple iMessage AI Chat Summary (Center-Left) */
+    /* Apple iMessage AI Chat Summary (Center-Left) */
     .imessage-widget {
       position: absolute;
       left: 26px;
-      top: 48%;
+      top: 50%;
       transform: translateY(-50%);
-      width: 340px;
+      width: 350px;
       max-width: calc(100vw - 440px);
+      max-height: 520px;
       z-index: 105;
       display: flex;
       flex-direction: column;
@@ -352,26 +354,66 @@
       display: flex;
       flex-direction: column;
       align-items: flex-start;
+      width: 100%;
+    }
+    .imessage-thread {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      max-height: 380px;
+      width: 100%;
+      overflow-y: auto;
+      padding: 4px 6px 4px 2px;
+      scroll-behavior: smooth;
+    }
+    .imessage-thread::-webkit-scrollbar {
+      width: 4px;
+    }
+    .imessage-thread::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.2);
+      border-radius: 4px;
+    }
+    .imessage-msg-row {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 3px;
+      width: 100%;
+      animation: imessageBubbleFade 0.25s ease-out;
+    }
+    @keyframes imessageBubbleFade {
+      0% { opacity: 0; transform: translateY(6px); }
+      100% { opacity: 1; transform: translateY(0); }
+    }
+    .imessage-time-pill {
+      align-self: center;
+      font-size: 9.5px;
+      color: rgba(255, 255, 255, 0.55);
+      font-weight: 500;
+      margin: 2px 0;
+      letter-spacing: -0.1px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     }
     .imessage-bubble {
       position: relative;
       background: linear-gradient(180deg, #1d82f5 0%, #007aff 100%);
       color: #ffffff;
-      padding: 11px 15px;
+      padding: 10px 14px;
       border-radius: 18px 18px 18px 4px;
       font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
-      font-size: 13px;
+      font-size: 12.5px;
       line-height: 1.42;
       letter-spacing: -0.15px;
-      box-shadow: 0 8px 24px rgba(0, 122, 255, 0.35), 0 2px 6px rgba(0, 0, 0, 0.2);
+      box-shadow: 0 6px 20px rgba(0, 122, 255, 0.32), 0 2px 6px rgba(0, 0, 0, 0.2);
       cursor: pointer;
-      min-height: 38px;
+      min-height: 32px;
       word-break: break-word;
       transition: transform 0.15s ease, box-shadow 0.15s ease;
+      max-width: 95%;
     }
     .imessage-bubble:hover {
       transform: scale(1.01);
-      box-shadow: 0 10px 28px rgba(0, 122, 255, 0.45);
+      box-shadow: 0 8px 24px rgba(0, 122, 255, 0.42);
     }
     .imessage-bubble p {
       margin: 0;
@@ -388,17 +430,37 @@
       border-bottom-right-radius: 10px;
       clip-path: polygon(100% 0, 0 100%, 100% 100%);
     }
+    .imessage-typing-bubble {
+      position: relative;
+      background: rgba(44, 44, 46, 0.9);
+      border-radius: 16px 16px 16px 4px;
+      padding: 6px 10px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+      margin-top: 4px;
+      align-self: flex-start;
+    }
+    .imessage-typing-bubble::before {
+      content: "";
+      position: absolute;
+      bottom: 0;
+      left: -5px;
+      width: 10px;
+      height: 12px;
+      background: rgba(44, 44, 46, 0.9);
+      border-bottom-right-radius: 8px;
+      clip-path: polygon(100% 0, 0 100%, 100% 100%);
+    }
     .imessage-typing-indicator {
       display: flex;
       align-items: center;
       gap: 4px;
-      padding: 4px 6px;
-      height: 18px;
+      padding: 2px 4px;
+      height: 14px;
     }
     .imessage-typing-indicator span {
-      width: 7px;
-      height: 7px;
-      background: rgba(255, 255, 255, 0.9);
+      width: 6px;
+      height: 6px;
+      background: rgba(255, 255, 255, 0.85);
       border-radius: 50%;
       display: inline-block;
       animation: imessageBounce 1.2s infinite ease-in-out;
@@ -408,7 +470,7 @@
     .imessage-typing-indicator span:nth-child(3) { animation-delay: 0.4s; }
     @keyframes imessageBounce {
       0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
-      30% { transform: translateY(-5px); opacity: 1; }
+      30% { transform: translateY(-4px); opacity: 1; }
     }
     .imessage-status-label {
       font-size: 10px;
@@ -423,7 +485,7 @@
     /* Live Chat Box */
     .chat-box {
       margin-top: 4px;
-      height: 145px;
+      height: 150px;
       background: rgba(0, 0, 0, 0.45);
       border: 1px solid rgba(255, 255, 255, 0.08);
       border-radius: 8px;
@@ -437,9 +499,18 @@
     }
     .chat-msg {
       display: flex;
+      align-items: baseline;
       gap: 6px;
       line-height: 1.35;
       word-break: break-word;
+    }
+    .chat-time {
+      color: #64748b;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 9.5px;
+      flex-shrink: 0;
+      user-select: none;
+      letter-spacing: -0.2px;
     }
     .chat-user {
       font-weight: 700;
@@ -935,11 +1006,17 @@
       </div>
 
       <div id="imessage-body" class="imessage-bubble-container">
-        <div id="imessage-bubble" class="imessage-bubble" onclick="completeTypewriting()" title="Click to display full text immediately">
-          <div id="imessage-typing" class="imessage-typing-indicator" style="display: none;">
+        <div id="imessage-thread" class="imessage-thread">
+          <div class="imessage-msg-row" id="imessage-placeholder-row">
+            <div class="imessage-bubble" id="imessage-bubble" onclick="completeTypewriting()">
+              <p id="imessage-text">Listening to stream chat...</p>
+            </div>
+          </div>
+        </div>
+        <div id="imessage-typing" class="imessage-typing-bubble" style="display: none;">
+          <div class="imessage-typing-indicator">
             <span></span><span></span><span></span>
           </div>
-          <p id="imessage-text">Listening to stream chat...</p>
         </div>
         <div class="imessage-status-label">
           <span id="imessage-status">iMessage · Delivered</span>
@@ -1176,46 +1253,110 @@
       }
     }
 
+    // Persistent chat stores per channel (in-memory, up to 600 messages per channel)
+    const channelChatStore = {};
+    const seenChatSignatures = {};
     let lastChatChannel = null;
-    let lastChatMsgSignature = "";
+
+    function formatChatTime(timestamp) {
+      if (!timestamp) return "";
+      const d = new Date(typeof timestamp === "number" ? timestamp * 1000 : timestamp);
+      if (isNaN(d.getTime())) return "";
+      return d.toLocaleTimeString([], { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    }
+
+    function createChatMsgElement(m) {
+      const row = document.createElement("div");
+      row.className = "chat-msg";
+      const timeStr = formatChatTime(m.time);
+      row.innerHTML = `
+        ${timeStr ? `<span class="chat-time">${timeStr}</span>` : ""}
+        <span class="chat-user" style="color: ${getUserColor(m.user)}">${escapeHtml(m.user)}:</span>
+        <span class="chat-text">${escapeHtml(m.text)}</span>
+      `;
+      return row;
+    }
 
     function renderChatMessages(messages, channel, totalCount) {
       const chatBox = document.getElementById("chat-messages");
       const countLabel = document.getElementById("chat-count-label");
       if (!chatBox) return;
 
-      if (!messages || messages.length === 0) {
-        if (lastChatChannel !== channel) {
-          chatBox.innerHTML = `<span style="color: #64748b; font-size: 11px;">Listening to #${channel || "stream"} chat...</span>`;
-          if (countLabel) countLabel.innerText = "0 msgs";
-          lastChatChannel = channel;
-          lastChatMsgSignature = "";
+      if (!channel) {
+        chatBox.innerHTML = `<span style="color: #64748b; font-size: 11px;">Listening to chat...</span>`;
+        if (countLabel) countLabel.innerText = "0 msgs";
+        return;
+      }
+
+      if (!channelChatStore[channel]) {
+        channelChatStore[channel] = [];
+        seenChatSignatures[channel] = new Set();
+      }
+
+      const store = channelChatStore[channel];
+      const seen = seenChatSignatures[channel];
+
+      // Ingest any newly arrived messages into the persistent store
+      const newMessages = [];
+      if (messages && messages.length > 0) {
+        for (const m of messages) {
+          const sig = `${m.time || ''}_${m.user || ''}_${m.text || ''}`;
+          if (!seen.has(sig)) {
+            seen.add(sig);
+            store.push(m);
+            newMessages.push(m);
+          }
+        }
+        // Retain up to 600 persistent messages per channel
+        if (store.length > 600) {
+          const excess = store.length - 600;
+          for (let i = 0; i < excess; i++) {
+            const oldSig = `${store[i].time || ''}_${store[i].user || ''}_${store[i].text || ''}`;
+            seen.delete(oldSig);
+          }
+          store.splice(0, excess);
+        }
+      }
+
+      if (countLabel) {
+        const displayTotal = totalCount != null ? totalCount : store.length;
+        countLabel.innerText = `${displayTotal} msgs`;
+      }
+
+      const channelChanged = (lastChatChannel !== channel);
+      lastChatChannel = channel;
+
+      if (channelChanged) {
+        if (store.length === 0) {
+          chatBox.innerHTML = `<span style="color: #64748b; font-size: 11px;">Listening to #${channel} chat...</span>`;
+        } else {
+          chatBox.innerHTML = "";
+          const frag = document.createDocumentFragment();
+          for (const m of store) {
+            frag.appendChild(createChatMsgElement(m));
+          }
+          chatBox.appendChild(frag);
+          chatBox.scrollTop = chatBox.scrollHeight;
         }
         return;
       }
 
-      // Generate a fingerprint based on channel, count, and latest message identity so it updates even when capped at 50 msgs
-      const latestMsg = messages[messages.length - 1];
-      const signature = `${channel}_${messages.length}_${latestMsg?.id || ''}_${latestMsg?.time || ''}_${latestMsg?.user || ''}_${latestMsg?.text || ''}`;
-      if (lastChatChannel === channel && lastChatMsgSignature === signature) return;
-      lastChatChannel = channel;
-      lastChatMsgSignature = signature;
+      // If same channel and there are newly added messages, append them directly below!
+      if (newMessages.length > 0) {
+        // If placeholder was there, clear it
+        if (chatBox.querySelector("span[style*='color: #64748b']")) {
+          chatBox.innerHTML = "";
+        }
+        const isNearBottom = (chatBox.scrollHeight - chatBox.scrollTop - chatBox.clientHeight) < 60;
+        const frag = document.createDocumentFragment();
+        for (const m of newMessages) {
+          frag.appendChild(createChatMsgElement(m));
+        }
+        chatBox.appendChild(frag);
 
-      if (countLabel) {
-        const displayTotal = totalCount != null ? totalCount : messages.length;
-        countLabel.innerText = `${displayTotal} msgs`;
-      }
-      const isNearBottom = (chatBox.scrollHeight - chatBox.scrollTop - chatBox.clientHeight) < 50;
-
-      chatBox.innerHTML = messages.map(m => `
-        <div class="chat-msg">
-          <span class="chat-user" style="color: ${getUserColor(m.user)}">${escapeHtml(m.user)}:</span>
-          <span class="chat-text">${escapeHtml(m.text)}</span>
-        </div>
-      `).join("");
-
-      if (isNearBottom || messages.length <= 8) {
-        chatBox.scrollTop = chatBox.scrollHeight;
+        if (isNearBottom || store.length <= 15) {
+          chatBox.scrollTop = chatBox.scrollHeight;
+        }
       }
     }
 
@@ -1339,9 +1480,53 @@
       renderChatDescriptor(data.latest_chat_description, activeTab);
     }
 
-    let lastDescriptorId = {};
+    const channelDescriptorHistory = {};
+    const seenDescriptorIds = {};
+    let lastDescriptorChannel = null;
     let typewriteTimeout = null;
-    let currentFullDescription = "";
+    let currentTypingEl = null;
+    let currentTypingText = "";
+
+    function formatDescriptorTime(dateStrOrTs) {
+      if (!dateStrOrTs) return "Just now";
+      if (typeof dateStrOrTs === "number") {
+        const d = new Date(dateStrOrTs * 1000);
+        return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+      }
+      if (typeof dateStrOrTs === "string") {
+        if (dateStrOrTs.includes(" ")) {
+          const parts = dateStrOrTs.split(" ");
+          return parts[1] || dateStrOrTs;
+        }
+        return dateStrOrTs;
+      }
+      return "Just now";
+    }
+
+    function createDescriptorMsgRow(desc) {
+      const row = document.createElement("div");
+      row.className = "imessage-msg-row";
+      row.id = `imessage-row-${desc.id || Math.random().toString(36).substring(7)}`;
+
+      const timeStr = formatDescriptorTime(desc.created_at || desc.window_end);
+      const timePill = document.createElement("div");
+      timePill.className = "imessage-time-pill";
+      timePill.textContent = timeStr;
+      row.appendChild(timePill);
+
+      const bubble = document.createElement("div");
+      bubble.className = "imessage-bubble";
+      bubble.onclick = completeTypewriting;
+      bubble.title = "Click to finish text animation";
+
+      const p = document.createElement("p");
+      p.id = `imessage-text-${desc.id}`;
+      p.textContent = desc.description || "Chat is currently quiet.";
+      bubble.appendChild(p);
+
+      row.appendChild(bubble);
+      return { row, p, bubble };
+    }
 
     function completeTypewriting() {
       if (typewriteTimeout) {
@@ -1349,11 +1534,10 @@
         typewriteTimeout = null;
       }
       const typingEl = document.getElementById("imessage-typing");
-      const textEl = document.getElementById("imessage-text");
       if (typingEl) typingEl.style.display = "none";
-      if (textEl) {
-        textEl.style.display = "block";
-        if (currentFullDescription) textEl.textContent = currentFullDescription;
+      if (currentTypingEl && currentTypingText) {
+        currentTypingEl.style.display = "block";
+        currentTypingEl.textContent = currentTypingText;
       }
     }
 
@@ -1366,13 +1550,81 @@
       if (btn) btn.innerText = imessageMinimized ? "＋" : "─";
     }
 
+    async function loadHistoricalDescriptors(channel) {
+      try {
+        const res = await fetch(`/api/descriptors?channel=${encodeURIComponent(channel)}&limit=8`);
+        if (!res.ok) return;
+        const list = await res.json();
+        if (Array.isArray(list) && list.length > 0) {
+          // Reverse so oldest displays first, new chats display below!
+          const chrono = list.slice().reverse();
+          if (!channelDescriptorHistory[channel]) {
+            channelDescriptorHistory[channel] = [];
+            seenDescriptorIds[channel] = new Set();
+          }
+          const store = channelDescriptorHistory[channel];
+          const seen = seenDescriptorIds[channel];
+          for (const d of chrono) {
+            if (!seen.has(d.id)) {
+              seen.add(d.id);
+              store.push(d);
+            }
+          }
+          if (activeTab === channel) {
+            rebuildDescriptorThread(channel);
+          }
+        }
+      } catch (err) {
+        console.debug("Could not load historical descriptors:", err);
+      }
+    }
+
+    function rebuildDescriptorThread(channel) {
+      const threadEl = document.getElementById("imessage-thread");
+      const timeEl = document.getElementById("imessage-contact-time");
+      const statusEl = document.getElementById("imessage-status");
+      if (!threadEl) return;
+
+      threadEl.innerHTML = "";
+      const history = channelDescriptorHistory[channel] || [];
+
+      if (history.length === 0) {
+        threadEl.innerHTML = `
+          <div class="imessage-msg-row" id="imessage-placeholder-row">
+            <div class="imessage-bubble">
+              <p>Listening to stream chat...</p>
+            </div>
+          </div>
+        `;
+        if (timeEl) timeEl.innerText = `#${channel} · Connecting`;
+        if (statusEl) statusEl.innerText = "iMessage · Standby";
+        return;
+      }
+
+      for (const d of history) {
+        const { row } = createDescriptorMsgRow(d);
+        threadEl.appendChild(row);
+      }
+
+      const latest = history[history.length - 1];
+      const latestTime = formatDescriptorTime(latest.created_at || latest.window_end);
+      if (timeEl) timeEl.innerText = `#${channel} · ${latestTime}`;
+      if (statusEl) {
+        const count = latest.message_count || 0;
+        const model = latest.model_name || "gemini-3.6-flash";
+        statusEl.innerText = `iMessage · Delivered (${count} msgs · ${model})`;
+      }
+
+      threadEl.scrollTop = threadEl.scrollHeight;
+    }
+
     function renderChatDescriptor(descriptor, channel) {
       const container = document.getElementById("imessage-container");
-      const textEl = document.getElementById("imessage-text");
+      const threadEl = document.getElementById("imessage-thread");
       const typingEl = document.getElementById("imessage-typing");
       const timeEl = document.getElementById("imessage-contact-time");
       const statusEl = document.getElementById("imessage-status");
-      if (!container || !textEl) return;
+      if (!container || !threadEl) return;
 
       if (!channel) {
         container.style.display = "none";
@@ -1380,17 +1632,45 @@
       }
       container.style.display = "flex";
 
-      if (!descriptor) {
-        textEl.innerText = "Listening to stream chat...";
-        if (timeEl) timeEl.innerText = `#${channel} · Connecting`;
-        if (statusEl) statusEl.innerText = "iMessage · Standby";
+      if (!channelDescriptorHistory[channel]) {
+        channelDescriptorHistory[channel] = [];
+        seenDescriptorIds[channel] = new Set();
+        loadHistoricalDescriptors(channel);
+      }
+
+      const history = channelDescriptorHistory[channel];
+      const seen = seenDescriptorIds[channel];
+
+      const channelChanged = (lastDescriptorChannel !== channel);
+      lastDescriptorChannel = channel;
+
+      if (channelChanged) {
+        rebuildDescriptorThread(channel);
+      }
+
+      if (!descriptor) return;
+
+      const isNew = !seen.has(descriptor.id);
+      if (!isNew) {
         return;
       }
 
-      const fullText = descriptor.description || "Chat is currently quiet.";
-      currentFullDescription = fullText;
-      const createdTime = descriptor.created_at ? (descriptor.created_at.split(" ")[1] || descriptor.created_at) : "Just now";
+      // Add new descriptor to persistent history
+      seen.add(descriptor.id);
+      history.push(descriptor);
 
+      // Remove placeholder row if present
+      const placeholder = document.getElementById("imessage-placeholder-row");
+      if (placeholder) placeholder.remove();
+
+      // Create new bubble row and append below!
+      const { row, p, bubble } = createDescriptorMsgRow(descriptor);
+      const fullText = descriptor.description || "Chat is currently quiet.";
+      p.textContent = "";
+      p.style.display = "none";
+      threadEl.appendChild(row);
+
+      const createdTime = formatDescriptorTime(descriptor.created_at || descriptor.window_end);
       if (timeEl) timeEl.innerText = `#${channel} · ${createdTime}`;
       if (statusEl) {
         const count = descriptor.message_count || 0;
@@ -1398,38 +1678,35 @@
         statusEl.innerText = `iMessage · Delivered (${count} msgs · ${model})`;
       }
 
-      // Check if this is a newly arrived description for this channel
-      if (lastDescriptorId[channel] !== descriptor.id) {
-        lastDescriptorId[channel] = descriptor.id;
+      // Typewriter animation on the newly added bubble below
+      if (typewriteTimeout) clearTimeout(typewriteTimeout);
+      currentTypingEl = p;
+      currentTypingText = fullText;
 
-        // Animate with typewriter write-out effect!
-        if (typewriteTimeout) clearTimeout(typewriteTimeout);
+      if (typingEl) typingEl.style.display = "flex";
+      threadEl.scrollTop = threadEl.scrollHeight;
 
-        if (typingEl) typingEl.style.display = "flex";
-        textEl.style.display = "none";
-        textEl.textContent = "";
+      typewriteTimeout = setTimeout(() => {
+        if (typingEl) typingEl.style.display = "none";
+        p.style.display = "block";
 
-        // Show typing indicator briefly, then write out characters
-        typewriteTimeout = setTimeout(() => {
-          if (typingEl) typingEl.style.display = "none";
-          textEl.style.display = "block";
-
-          let charIndex = 0;
-          function typeNextChar() {
-            if (charIndex < fullText.length) {
-              textEl.textContent = fullText.substring(0, charIndex + 1);
-              charIndex++;
-              const speed = fullText.length > 250 ? 10 : 16;
-              typewriteTimeout = setTimeout(typeNextChar, speed);
-            } else {
-              typewriteTimeout = null;
-            }
+        let charIndex = 0;
+        function typeNextChar() {
+          if (charIndex < fullText.length) {
+            p.textContent = fullText.substring(0, charIndex + 1);
+            charIndex++;
+            threadEl.scrollTop = threadEl.scrollHeight;
+            const speed = fullText.length > 250 ? 10 : 16;
+            typewriteTimeout = setTimeout(typeNextChar, speed);
+          } else {
+            typewriteTimeout = null;
+            currentTypingEl = null;
+            currentTypingText = "";
+            threadEl.scrollTop = threadEl.scrollHeight;
           }
-          typeNextChar();
-        }, 550);
-      } else if (!typewriteTimeout && textEl.textContent !== fullText) {
-        textEl.textContent = fullText;
-      }
+        }
+        typeNextChar();
+      }, 550);
     }
 
     async function addStreamSession() {
