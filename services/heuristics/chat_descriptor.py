@@ -9,7 +9,7 @@ from typing import List, Optional
 logger = logging.getLogger(__name__)
 
 DEFAULT_INTERVAL_SECONDS = int(os.getenv("CHAT_DESCRIPTOR_INTERVAL_SECONDS", "60"))
-DEFAULT_GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+DEFAULT_GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
 DEFAULT_LOCAL_URL = os.getenv("LOCAL_LLM_URL", "http://localhost:11434/v1")
 DEFAULT_LOCAL_MODEL = os.getenv("LOCAL_LLM_MODEL", "llama3.2:1b")
 

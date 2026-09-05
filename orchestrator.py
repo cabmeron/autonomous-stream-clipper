@@ -94,7 +94,7 @@ class StreamSession:
         self.chat_descriptor_service = LocalChatDescriptorService(
             interval_seconds=DESCRIPTOR_INTERVAL_SEC,
             gemini_api_key=os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or "",
-            gemini_model=os.getenv("GEMINI_MODEL", "gemini-2.0-flash"),
+            gemini_model=os.getenv("GEMINI_MODEL", "gemini-3.6-flash"),
             local_api_base_url=LOCAL_LLM_URL,
             local_model_name=LOCAL_LLM_MODEL,
         )

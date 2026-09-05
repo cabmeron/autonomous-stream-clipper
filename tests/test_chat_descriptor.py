@@ -55,7 +55,7 @@ async def test_chat_descriptor_gemini_api_call():
     service = LocalChatDescriptorService(
         interval_seconds=60,
         gemini_api_key="fake-test-gemini-key",
-        gemini_model="gemini-2.0-flash",
+        gemini_model="gemini-3.6-flash",
     )
     messages = [
         {"user": f"user{i}", "text": f"LUL {i}", "time": 100.0 + i}
@@ -93,7 +93,7 @@ async def test_chat_descriptor_gemini_api_call():
     assert result is not None
     assert result["channel_name"] == "marlon"
     assert result["message_count"] == 10
-    assert result["model_name"] == "gemini-2.0-flash"
+    assert result["model_name"] == "gemini-3.6-flash"
     assert "Chat exploded in laughter" in result["description"]
 
 
@@ -148,7 +148,7 @@ def test_db_save_and_retrieve_chat_descriptor(tmp_path):
         "window_end": 1060.0,
         "message_count": 45,
         "description": "Chat is thoroughly engaged in the tactical debate. Viewers are actively analyzing crosshair placement.",
-        "model_name": "gemini-2.0-flash",
+        "model_name": "gemini-3.6-flash",
     }
 
     saved_id = db.save_chat_descriptor(record)
@@ -159,7 +159,7 @@ def test_db_save_and_retrieve_chat_descriptor(tmp_path):
     assert retrieved[0]["id"] == "desc-12345"
     assert retrieved[0]["channel_name"] == "tarik"
     assert retrieved[0]["message_count"] == 45
-    assert retrieved[0]["model_name"] == "gemini-2.0-flash"
+    assert retrieved[0]["model_name"] == "gemini-3.6-flash"
     assert "tactical debate" in retrieved[0]["description"]
 
 
