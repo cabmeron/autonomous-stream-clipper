@@ -1600,6 +1600,7 @@
     }
 
     function selectTab(channel) {
+      channel = sanitizeChannelName(channel);
       if (!channel) return;
       activeTab = channel;
 
@@ -1627,6 +1628,8 @@
     }
 
     function mountStreamPlayer(channel) {
+      channel = sanitizeChannelName(channel);
+      if (!channel) return;
       const frame = document.getElementById("twitch-frame");
       if (!frame) return;
 
@@ -1649,6 +1652,8 @@
     }
 
     function createTwitchPlayer(channel) {
+      channel = sanitizeChannelName(channel);
+      if (!channel) return;
       const frame = document.getElementById("twitch-frame");
       frame.innerHTML = "";
 
@@ -1711,6 +1716,8 @@
     }
 
     function mountDirectHlsPlayer(channel) {
+      channel = sanitizeChannelName(channel);
+      if (!channel) return;
       const frame = document.getElementById("twitch-frame");
       if (!frame) return;
 
@@ -2118,7 +2125,11 @@
         try {
           const msg = JSON.parse(evt.data);
           if (msg.sessions) {
-            for (const [ch, sData] of Object.entries(msg.sessions)) {
+            const cleanIncoming = {};
+            for (const [rawCh, sData] of Object.entries(msg.sessions)) {
+              const ch = sanitizeChannelName(rawCh);
+              if (!ch) continue;
+              cleanIncoming[ch] = sData;
               activeSessions[ch] = sData;
               if (!channelHistories[ch]) {
                 channelHistories[ch] = new Array(50).fill(0);
@@ -2129,12 +2140,12 @@
 
             let channelsChanged = false;
             for (const ch of Object.keys(activeSessions)) {
-              if (!msg.sessions[ch]) {
+              if (!cleanIncoming[ch]) {
                 delete activeSessions[ch];
                 channelsChanged = true;
               }
             }
-            if (Object.keys(msg.sessions).length !== Object.keys(activeSessions).length) {
+            if (Object.keys(cleanIncoming).length !== Object.keys(activeSessions).length) {
               channelsChanged = true;
             }
 
@@ -2183,8 +2194,9 @@
     async function fetchRecentClips() {
       try {
         let url = "/api/clips?limit=40";
-        if (currentClipFilter === "current" && activeTab) {
-          url += `&channel=${encodeURIComponent(activeTab)}`;
+        const tab = sanitizeChannelName(activeTab);
+        if (currentClipFilter === "current" && tab) {
+          url += `&channel=${encodeURIComponent(tab)}`;
         }
 
         const res = await fetch(url);

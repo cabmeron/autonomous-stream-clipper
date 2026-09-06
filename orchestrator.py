@@ -761,6 +761,8 @@ class StreamClipperOrchestrator:
         async def get_clips_handler(request):
             limit = int(request.query.get("limit", 50))
             channel_filter = request.query.get("channel")
+            if channel_filter:
+                channel_filter = clean_channel_name(channel_filter)
             clips = self.db.get_recent_clips(limit=limit, channel=channel_filter)
             return web.json_response(clips)
 
@@ -893,21 +895,22 @@ class StreamClipperOrchestrator:
         async def post_summarize_screen_handler(request):
             """On-demand multimodal screen & chat summarization."""
             try:
-                channel = request.match_info.get("channel") or request.query.get("channel")
-                if not channel and request.can_read_body:
+                raw_channel = request.match_info.get("channel") or request.query.get("channel")
+                if not raw_channel and request.can_read_body:
                     try:
                         body = await request.json()
-                        channel = body.get("channel")
+                        raw_channel = body.get("channel")
                     except Exception:
                         pass
 
+                channel = clean_channel_name(raw_channel) if raw_channel else None
                 if not channel:
                     channel = list(self.sessions.keys())[0] if self.sessions else None
 
-                if not channel or channel.lower() not in self.sessions:
-                    return web.json_response({"error": f"Channel '{channel}' is not actively monitored"}, status=404)
+                if not channel or channel not in self.sessions:
+                    return web.json_response({"error": f"Channel '{raw_channel or channel}' is not actively monitored"}, status=404)
 
-                session = self.sessions[channel.lower()]
+                session = self.sessions[channel]
                 messages = list(session.chat_engine.recent_messages) if session.chat_engine else []
 
                 result = await session.screen_summarizer.summarize_screen(
@@ -924,6 +927,8 @@ class StreamClipperOrchestrator:
         async def get_screen_summaries_handler(request):
             limit = int(request.query.get("limit", 10))
             channel = request.query.get("channel")
+            if channel:
+                channel = clean_channel_name(channel)
             summaries = await asyncio.to_thread(self.db.get_recent_screen_summaries, channel, limit)
             return web.json_response(summaries)
 
