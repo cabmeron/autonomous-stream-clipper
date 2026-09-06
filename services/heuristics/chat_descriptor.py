@@ -29,7 +29,8 @@ class LocalChatDescriptorService:
         enabled: bool = True,
     ):
         self.interval_seconds = max(10, interval_seconds)
-        self.gemini_api_key = gemini_api_key or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or ""
+        self.explicit_key = gemini_api_key is not None
+        self.gemini_api_key = gemini_api_key if self.explicit_key else (os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or "")
         self.gemini_model = gemini_model
         self.local_api_base_url = local_api_base_url.rstrip("/")
         self.local_model_name = local_model_name
@@ -180,8 +181,9 @@ class LocalChatDescriptorService:
         system_instruction, user_content = self.format_prompts(messages, channel, int(self.interval_seconds))
 
         description_text = ""
-        # Refresh API key in case it was added or updated
-        self.gemini_api_key = self.gemini_api_key or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or ""
+        # Refresh API key in case it was added or updated (if not explicitly set)
+        if not self.explicit_key:
+            self.gemini_api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or ""
         active_provider = self.provider
         model_tag = self.gemini_model if active_provider == "gemini" else self.local_model_name
 

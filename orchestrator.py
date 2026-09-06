@@ -931,6 +931,60 @@ class StreamClipperOrchestrator:
         app.router.add_post("/api/summarize-screen", post_summarize_screen_handler)
         app.router.add_get("/api/screen-summaries", get_screen_summaries_handler)
 
+        async def get_live_playlist_handler(request):
+            """Generates a live HLS m3u8 playlist from active TS segments in the RAM ring buffer."""
+            channel = request.match_info.get("channel", "").lower()
+            if channel not in self.sessions:
+                return web.Response(text="#EXTM3U\n", status=404, content_type="application/vnd.apple.mpegurl")
+            session = self.sessions[channel]
+            if not session.buffer or not os.path.exists(session.buffer.shm_dir):
+                return web.Response(text="#EXTM3U\n", status=503, content_type="application/vnd.apple.mpegurl")
+
+            segments = session.buffer.get_active_segments()
+            if not segments:
+                return web.Response(text="#EXTM3U\n", status=503, content_type="application/vnd.apple.mpegurl")
+
+            usable = segments[:-1] if len(segments) > 1 else segments
+            recent = usable[-5:]
+            target_duration = getattr(session.buffer, "segment_time", 10)
+
+            lines = [
+                "#EXTM3U",
+                "#EXT-X-VERSION:3",
+                f"#EXT-X-TARGETDURATION:{target_duration}",
+                f"#EXT-X-MEDIA-SEQUENCE:{int(time.time() // target_duration)}",
+            ]
+            for seg_path in recent:
+                seg_name = os.path.basename(seg_path)
+                lines.append(f"#EXTINF:{target_duration}.0,")
+                lines.append(f"/api/sessions/{channel}/segments/{seg_name}")
+
+            playlist_content = "\n".join(lines) + "\n"
+            return web.Response(
+                text=playlist_content,
+                content_type="application/vnd.apple.mpegurl",
+                headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+            )
+
+        async def get_live_segment_handler(request):
+            """Serves a raw MPEG-TS video segment from the RAM ring buffer."""
+            channel = request.match_info.get("channel", "").lower()
+            segment = request.match_info.get("segment", "")
+            if ".." in segment or "/" in segment or not segment.endswith(".ts"):
+                return web.Response(text="Invalid segment", status=400)
+            if channel not in self.sessions:
+                return web.Response(text="Session not found", status=404)
+            session = self.sessions[channel]
+            if not session.buffer or not os.path.exists(session.buffer.shm_dir):
+                return web.Response(text="Buffer not found", status=404)
+            seg_path = os.path.join(session.buffer.shm_dir, segment)
+            if not os.path.exists(seg_path):
+                return web.Response(text="Segment not found", status=404)
+            return web.FileResponse(seg_path, headers={"Content-Type": "video/MP2T"})
+
+        app.router.add_get("/api/sessions/{channel}/live.m3u8", get_live_playlist_handler)
+        app.router.add_get("/api/sessions/{channel}/segments/{segment}", get_live_segment_handler)
+
         # Static mounts
         app.router.add_static("/clips", clips_dir)
         app.router.add_static("/", static_dir)

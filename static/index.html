@@ -4,7 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Autonomous Stream Clipper - Multi-Session HUD</title>
-  <script src="https://player.twitch.tv/js/v3/index.js"></script>
+  <script src="https://player.twitch.tv/js/embed/v1.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@1"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -189,12 +190,25 @@
     }
 
     #twitch-frame {
+      position: absolute;
+      top: 0;
+      left: 0;
       width: 100%;
       height: 100%;
       display: none;
+      background: #000;
+      z-index: 1;
     }
     #twitch-frame.active {
       display: block;
+    }
+    #twitch-frame iframe,
+    #twitch-frame video {
+      width: 100%;
+      height: 100%;
+      border: none;
+      display: block;
+      object-fit: contain;
     }
 
     /* Right Telemetry Card */
@@ -214,6 +228,12 @@
       display: flex;
       flex-direction: column;
       overflow-y: auto;
+      transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.25s ease;
+    }
+    #hud-card.minimized {
+      transform: translateX(calc(100% + 30px));
+      opacity: 0;
+      pointer-events: none;
     }
     .hud-header {
       display: flex;
@@ -521,6 +541,123 @@
       flex-direction: column;
       z-index: 100;
       box-shadow: 0 16px 40px rgba(0, 0, 0, 0.7);
+      transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.25s ease;
+    }
+    #gallery-bar.minimized {
+      transform: translateY(calc(100% + 30px));
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    /* Top Bar Action Buttons */
+    .btn-audio-toggle {
+      background: rgba(16, 185, 129, 0.15);
+      border: 1px solid rgba(16, 185, 129, 0.45);
+      color: #34d399;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 6px 12px;
+      border-radius: 6px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      transition: all 0.15s ease;
+      white-space: nowrap;
+    }
+    .btn-audio-toggle:hover {
+      background: rgba(16, 185, 129, 0.3);
+      color: #6ee7b7;
+      box-shadow: 0 0 12px rgba(16, 185, 129, 0.3);
+    }
+    .btn-audio-toggle.muted {
+      background: rgba(239, 68, 68, 0.15);
+      border-color: rgba(239, 68, 68, 0.5);
+      color: #fca5a5;
+      animation: pulse-audio 1.5s infinite;
+    }
+    @keyframes pulse-audio {
+      0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.5); }
+      70% { box-shadow: 0 0 0 6px rgba(239, 68, 68, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+    }
+    .btn-theater-toggle {
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      color: #cbd5e1;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 6px 12px;
+      border-radius: 6px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      transition: all 0.15s ease;
+      white-space: nowrap;
+    }
+    .btn-theater-toggle:hover {
+      background: rgba(255, 255, 255, 0.12);
+      color: #fff;
+    }
+    .btn-theater-toggle.active {
+      background: rgba(56, 189, 248, 0.2);
+      border-color: #38bdf8;
+      color: #38bdf8;
+      box-shadow: 0 0 10px rgba(56, 189, 248, 0.25);
+    }
+
+    /* HUD Audio & Volume Bar */
+    .hud-volume-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 5px 10px;
+      background: rgba(0, 0, 0, 0.35);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 8px;
+      margin-bottom: 8px;
+    }
+    .btn-hud-vol-icon {
+      background: none;
+      border: none;
+      font-size: 13px;
+      cursor: pointer;
+      color: #cbd5e1;
+      padding: 0;
+      display: flex;
+      align-items: center;
+    }
+    .btn-hud-vol-icon:hover {
+      color: #38bdf8;
+    }
+    .hud-vol-slider {
+      flex: 1;
+      height: 4px;
+      accent-color: #38bdf8;
+      cursor: pointer;
+    }
+    .hud-vol-label {
+      font-size: 10px;
+      font-weight: 700;
+      font-family: monospace;
+      color: #94a3b8;
+      min-width: 30px;
+      text-align: right;
+    }
+    .btn-icon-hud {
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 4px;
+      color: #94a3b8;
+      font-size: 11px;
+      cursor: pointer;
+      padding: 2px 6px;
+      line-height: 1;
+    }
+    .btn-icon-hud:hover {
+      background: rgba(255, 255, 255, 0.18);
+      color: #fff;
     }
     .gallery-top {
       display: flex;
@@ -964,6 +1101,14 @@
       <div class="add-group">
         <input id="channel-input" type="text" placeholder="Add channel (e.g. zarbex)" onkeydown="if(event.key==='Enter') addStreamSession();" />
         <button class="btn-add" onclick="addStreamSession()">+ Add Stream</button>
+        <button id="btn-audio-toggle" class="btn-audio-toggle active" onclick="toggleStreamAudio()" title="Toggle Stream Audio (Unmute / Mute)">
+          <span id="top-audio-icon">🔊</span>
+          <span id="top-audio-text">Audio: ON</span>
+        </button>
+        <button id="btn-theater-toggle" class="btn-theater-toggle" onclick="toggleTheaterMode()" title="Toggle Full Stream / HUD View">
+          <span id="theater-icon">⛶</span>
+          <span id="theater-text">Full Stream</span>
+        </button>
         <button id="btn-summarize-screen" class="btn-summarize-screen" onclick="triggerScreenSummary()" title="Capture current frame & chat to summarize screen state">
           <span id="summarize-btn-icon">📸</span>
           <span id="summarize-btn-text">Summarize Screen</span>
@@ -1021,8 +1166,17 @@
     <!-- HUD Metrics Card -->
     <div id="hud-card">
       <div class="hud-header">
-        <span id="hud-channel-title" class="hud-title">STREAM HEURISTICS</span>
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span id="hud-channel-title" class="hud-title">STREAM HEURISTICS</span>
+          <button class="btn-icon-hud" onclick="toggleTheaterMode()" title="Minimize HUD for unobstructed stream view">─</button>
+        </div>
         <span id="badge" class="badge badge-idle">STANDBY</span>
+      </div>
+
+      <div class="hud-volume-bar">
+        <button id="btn-hud-audio" class="btn-hud-vol-icon" onclick="toggleStreamAudio()" title="Mute/Unmute Audio">🔊</button>
+        <input id="hud-volume-slider" class="hud-vol-slider" type="range" min="0" max="1" step="0.05" value="1" oninput="setStreamVolume(this.value)" title="Stream Audio Volume" />
+        <span id="hud-volume-label" class="hud-vol-label">100%</span>
       </div>
 
       <div class="section-title">
@@ -1149,6 +1303,11 @@
     let currentActiveModalClipId = null;
     let currentActiveJobId = null;
     let twitchPlayer = null;
+    let currentMountedChannel = null;
+    let streamMuted = false;
+    let streamVolume = 1.0;
+    let isTheaterMode = false;
+    let activeHls = null;
 
     // In-memory cache for fast UI updates
     window.activeJobs = {};
@@ -1371,7 +1530,17 @@
         document.getElementById("hud-channel-title").innerText = "STREAM HEURISTICS";
         document.getElementById("badge").className = "badge badge-idle";
         document.getElementById("badge").innerText = "STANDBY";
-        if (twitchPlayer) try { twitchPlayer.pause(); } catch (e) {}
+        currentMountedChannel = null;
+        if (activeHls) {
+          try { activeHls.destroy(); } catch (e) {}
+          activeHls = null;
+        }
+        if (twitchPlayer) {
+          try { twitchPlayer.destroy(); } catch (e) {}
+          twitchPlayer = null;
+        }
+        const frame = document.getElementById("twitch-frame");
+        if (frame) frame.innerHTML = "";
         activeTab = null;
         drawChart();
         drawWaveform([]);
@@ -1399,12 +1568,22 @@
           </div>
         `;
       }).join("");
+
+      if (!currentMountedChannel || currentMountedChannel !== activeTab) {
+        selectTab(activeTab);
+      }
     }
 
     function selectTab(channel) {
-      if (activeTab === channel && twitchPlayer) return;
+      if (!channel) return;
       activeTab = channel;
-      renderTabs();
+
+      // Update tab active classes
+      const tabs = document.querySelectorAll(".tab-item");
+      tabs.forEach(t => {
+        if (t.innerText.includes(`#${channel}`)) t.classList.add("active");
+        else t.classList.remove("active");
+      });
 
       if (!channelHistories[channel]) {
         channelHistories[channel] = new Array(50).fill(0);
@@ -1412,14 +1591,9 @@
 
       document.getElementById("hud-channel-title").innerText = `#${channel.toUpperCase()}`;
 
-      if (twitchPlayer) {
-        try {
-          twitchPlayer.setChannel(channel);
-        } catch (e) {
-          createTwitchPlayer(channel);
-        }
-      } else {
-        createTwitchPlayer(channel);
+      if (currentMountedChannel !== channel) {
+        currentMountedChannel = channel;
+        mountStreamPlayer(channel);
       }
 
       updateActiveHUD();
@@ -1427,18 +1601,208 @@
       fetchRecentClips();
     }
 
+    function mountStreamPlayer(channel) {
+      const frame = document.getElementById("twitch-frame");
+      if (!frame) return;
+
+      // Clean up previous player / HLS instances
+      if (activeHls) {
+        try { activeHls.destroy(); } catch (e) {}
+        activeHls = null;
+      }
+      if (twitchPlayer) {
+        try { twitchPlayer.destroy(); } catch (e) {}
+        twitchPlayer = null;
+      }
+      frame.innerHTML = "";
+
+      const isSimulation = (channel === "test" || channel === "demo" || channel.startsWith("test"));
+
+      if (isSimulation) {
+        mountHlsPlayer(channel);
+        return;
+      }
+
+      createTwitchPlayer(channel);
+    }
+
     function createTwitchPlayer(channel) {
       const frame = document.getElementById("twitch-frame");
       frame.innerHTML = "";
-      try {
-        twitchPlayer = new Twitch.Player("twitch-frame", {
-          width: "100%",
-          height: "100%",
-          channel: channel,
-          parent: [window.location.hostname || "localhost", "127.0.0.1"]
+
+      const currentHost = window.location.hostname || "localhost";
+      const parents = Array.from(new Set([currentHost, "localhost", "127.0.0.1"]));
+
+      if (typeof Twitch !== "undefined" && Twitch.Player) {
+        try {
+          twitchPlayer = new Twitch.Player("twitch-frame", {
+            width: "100%",
+            height: "100%",
+            channel: channel,
+            autoplay: true,
+            muted: streamMuted,
+            parent: parents
+          });
+
+          twitchPlayer.addEventListener(Twitch.Player.READY, () => {
+            try {
+              twitchPlayer.play();
+              twitchPlayer.setMuted(streamMuted);
+              twitchPlayer.setVolume(streamMuted ? 0 : streamVolume);
+            } catch (e) {
+              console.debug("Twitch un-mute notice:", e);
+            }
+            updateAudioControlsUI();
+          });
+
+          twitchPlayer.addEventListener(Twitch.Player.PLAYING, () => {
+            updateAudioControlsUI();
+          });
+          return;
+        } catch (err) {
+          console.warn("Twitch.Player initialization failed, using iframe fallback:", err);
+        }
+      }
+
+      mountTwitchIframeFallback(channel);
+    }
+
+    function mountTwitchIframeFallback(channel) {
+      const frame = document.getElementById("twitch-frame");
+      const currentHost = window.location.hostname || "localhost";
+      const parentParam = `parent=${encodeURIComponent(currentHost)}&parent=localhost&parent=127.0.0.1`;
+      const mutedParam = streamMuted ? "true" : "false";
+
+      frame.innerHTML = `
+        <iframe
+          id="twitch-embed-iframe"
+          src="https://player.twitch.tv/?channel=${encodeURIComponent(channel)}&${parentParam}&autoplay=true&muted=${mutedParam}"
+          width="100%"
+          height="100%"
+          allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
+          allowfullscreen="true"
+          frameborder="0"
+          style="width: 100%; height: 100%; border: none; display: block;">
+        </iframe>
+      `;
+      updateAudioControlsUI();
+    }
+
+    function mountHlsPlayer(channel) {
+      const frame = document.getElementById("twitch-frame");
+      frame.innerHTML = `
+        <video id="local-stream-player" controls autoplay playsinline style="width: 100%; height: 100%; object-fit: contain; background: #000; display: block;"></video>
+      `;
+      const videoEl = document.getElementById("local-stream-player");
+      const streamUrl = `/api/sessions/${channel}/live.m3u8`;
+
+      if (window.Hls && Hls.isSupported()) {
+        const hls = new Hls({ lowLatencyMode: true, maxBufferLength: 10 });
+        hls.loadSource(streamUrl);
+        hls.attachMedia(videoEl);
+        activeHls = hls;
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+          videoEl.muted = streamMuted;
+          videoEl.volume = streamMuted ? 0 : streamVolume;
+          videoEl.play().catch(e => console.debug("HLS autoplay blocked:", e));
         });
-      } catch (err) {
-        console.warn("Twitch embed error:", err);
+      } else if (videoEl.canPlayType("application/vnd.apple.mpegurl")) {
+        videoEl.src = streamUrl;
+        videoEl.muted = streamMuted;
+        videoEl.volume = streamMuted ? 0 : streamVolume;
+        videoEl.play().catch(e => console.debug("Safari HLS autoplay blocked:", e));
+      }
+      updateAudioControlsUI();
+    }
+
+    function toggleStreamAudio() {
+      streamMuted = !streamMuted;
+      applyAudioSettings();
+    }
+
+    function setStreamVolume(val) {
+      streamVolume = parseFloat(val);
+      if (streamVolume > 0 && streamMuted) {
+        streamMuted = false;
+      } else if (streamVolume === 0) {
+        streamMuted = true;
+      }
+      applyAudioSettings();
+    }
+
+    function applyAudioSettings() {
+      if (twitchPlayer && typeof twitchPlayer.setMuted === "function") {
+        try {
+          twitchPlayer.setMuted(streamMuted);
+          twitchPlayer.setVolume(streamMuted ? 0 : streamVolume);
+        } catch (e) {
+          console.debug("Twitch player audio update error:", e);
+        }
+      }
+      const videoEl = document.getElementById("local-stream-player");
+      if (videoEl) {
+        videoEl.muted = streamMuted;
+        videoEl.volume = streamMuted ? 0 : streamVolume;
+        if (!streamMuted) videoEl.play().catch(() => {});
+      }
+      updateAudioControlsUI();
+    }
+
+    function updateAudioControlsUI() {
+      const topAudioBtn = document.getElementById("btn-audio-toggle");
+      const topAudioIcon = document.getElementById("top-audio-icon");
+      const topAudioText = document.getElementById("top-audio-text");
+      const hudAudioBtn = document.getElementById("btn-hud-audio");
+      const hudVolSlider = document.getElementById("hud-volume-slider");
+      const hudVolLabel = document.getElementById("hud-volume-label");
+
+      if (streamMuted || streamVolume === 0) {
+        if (topAudioBtn) {
+          topAudioBtn.className = "btn-audio-toggle muted";
+          topAudioBtn.title = "Audio is MUTED - Click to Unmute";
+        }
+        if (topAudioIcon) topAudioIcon.innerText = "🔇";
+        if (topAudioText) topAudioText.innerText = "Unmute Audio";
+        if (hudAudioBtn) hudAudioBtn.innerText = "🔇";
+        if (hudVolLabel) hudVolLabel.innerText = "0%";
+      } else {
+        if (topAudioBtn) {
+          topAudioBtn.className = "btn-audio-toggle active";
+          topAudioBtn.title = "Audio is ON - Click to Mute";
+        }
+        const volPct = Math.round(streamVolume * 100);
+        if (topAudioIcon) topAudioIcon.innerText = "🔊";
+        if (topAudioText) topAudioText.innerText = `Audio: ${volPct}%`;
+        if (hudAudioBtn) hudAudioBtn.innerText = "🔊";
+        if (hudVolLabel) hudVolLabel.innerText = `${volPct}%`;
+      }
+      if (hudVolSlider) {
+        hudVolSlider.value = streamMuted ? 0 : streamVolume;
+      }
+    }
+
+    function toggleTheaterMode() {
+      isTheaterMode = !isTheaterMode;
+      const hudCard = document.getElementById("hud-card");
+      const galleryBar = document.getElementById("gallery-bar");
+      const screenCard = document.getElementById("screen-summary-card");
+      const theaterBtn = document.getElementById("btn-theater-toggle");
+      const theaterIcon = document.getElementById("theater-icon");
+      const theaterText = document.getElementById("theater-text");
+
+      if (isTheaterMode) {
+        if (hudCard) hudCard.classList.add("minimized");
+        if (galleryBar) galleryBar.classList.add("minimized");
+        if (screenCard) screenCard.style.display = "none";
+        if (theaterBtn) theaterBtn.classList.add("active");
+        if (theaterIcon) theaterIcon.innerText = "🗗";
+        if (theaterText) theaterText.innerText = "Show HUD";
+      } else {
+        if (hudCard) hudCard.classList.remove("minimized");
+        if (galleryBar) galleryBar.classList.remove("minimized");
+        if (theaterBtn) theaterBtn.classList.remove("active");
+        if (theaterIcon) theaterIcon.innerText = "⛶";
+        if (theaterText) theaterText.innerText = "Full Stream";
       }
     }
 
@@ -1584,6 +1948,9 @@
       const channel = input.value.trim().toLowerCase().replace("#", "");
       if (!channel) return;
 
+      // User gesture: enable unmuted audio
+      streamMuted = false;
+
       try {
         const res = await fetch("/api/sessions", {
           method: "POST",
@@ -1595,6 +1962,7 @@
           activeSessions[channel] = { channel, status: "monitoring" };
           input.value = "";
           selectTab(channel);
+          applyAudioSettings();
         } else {
           alert("Error: " + (data.error || "Failed to add stream"));
         }
@@ -1608,12 +1976,14 @@
         await fetch(`/api/sessions/${channel}`, { method: "DELETE" });
         delete activeSessions[channel];
         delete channelHistories[channel];
+        delete channelChatStore[channel];
+        delete seenChatSignatures[channel];
         if (activeTab === channel) {
+          currentMountedChannel = null;
           const remaining = Object.keys(activeSessions);
           activeTab = remaining.length > 0 ? remaining[0] : null;
         }
         renderTabs();
-        if (activeTab) selectTab(activeTab);
       } catch (err) {
         console.error("Error closing session:", err);
       }
@@ -2027,6 +2397,7 @@
       .catch(() => renderTabs());
 
     fetchRecentClips();
+    updateAudioControlsUI();
   </script>
 </body>
 </html>

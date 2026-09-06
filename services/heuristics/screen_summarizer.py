@@ -32,7 +32,8 @@ class ScreenStateSummarizerService:
         timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
         shm_base: Optional[str] = None,
     ):
-        self.gemini_api_key = gemini_api_key or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or ""
+        self.explicit_key = gemini_api_key is not None
+        self.gemini_api_key = gemini_api_key if self.explicit_key else (os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or "")
         self.gemini_model = gemini_model
         self.timeout_seconds = timeout_seconds
         self.shm_base = shm_base or get_default_shm_dir()
@@ -180,8 +181,9 @@ class ScreenStateSummarizerService:
         """Captures screen and chat state and generates a 2-4 sentence multimodal description."""
         clean_channel = channel.lower().lstrip("#")
 
-        # Refresh API key from environment if needed
-        self.gemini_api_key = self.gemini_api_key or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or ""
+        # Refresh API key from environment if needed (and not explicitly passed)
+        if not self.explicit_key:
+            self.gemini_api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or ""
 
         # Extract frame if not explicitly passed
         if frame_bytes is None:

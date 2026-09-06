@@ -1,4 +1,5 @@
 import os
+import pytest
 from services.storage.local_storage import LocalStorageManager
 from services.storage.db import DatabaseRepository
 from services.processor.boundary_ai import BoundaryOptimizer
@@ -83,3 +84,75 @@ def test_local_boundary_optimizer_speech_pause():
     res = opt.find_optimal_cut(words, context, total_duration=60.0)
 
     assert 20.0 <= (res["cut_end"] - res["cut_start"]) <= 58.0
+
+
+@pytest.mark.asyncio
+async def test_live_hls_playlist_and_segment_routes(tmp_path):
+    from aiohttp import web
+    from aiohttp.test_utils import TestClient, TestServer
+    from orchestrator import StreamClipperOrchestrator, StreamSession
+    from services.ingest.stream_buffer import StreamRingBuffer
+
+    orch = StreamClipperOrchestrator()
+    buf = StreamRingBuffer(channel="teststream", shm_dir=str(tmp_path), simulate=True)
+    os.makedirs(buf.shm_dir, exist_ok=True)
+    seg1 = os.path.join(buf.shm_dir, "seg_00.ts")
+    with open(seg1, "wb") as f:
+        f.write(b"dummy ts content 1")
+    seg2 = os.path.join(buf.shm_dir, "seg_01.ts")
+    with open(seg2, "wb") as f:
+        f.write(b"dummy ts content 2")
+
+    session = StreamSession(channel="teststream", orchestrator=orch)
+    session.buffer = buf
+    orch.sessions["teststream"] = session
+
+    app = web.Application()
+
+    async def get_live_playlist_handler(request):
+        channel = request.match_info.get("channel", "").lower()
+        if channel not in orch.sessions:
+            return web.Response(text="#EXTM3U\n", status=404, content_type="application/vnd.apple.mpegurl")
+        s = orch.sessions[channel]
+        segments = s.buffer.get_active_segments()
+        usable = segments[:-1] if len(segments) > 1 else segments
+        lines = ["#EXTM3U", "#EXT-X-VERSION:3", f"#EXT-X-TARGETDURATION:{s.buffer.segment_time}"]
+        for p in usable:
+            lines.append(f"/api/sessions/{channel}/segments/{os.path.basename(p)}")
+        return web.Response(text="\n".join(lines), content_type="application/vnd.apple.mpegurl")
+
+    async def get_live_segment_handler(request):
+        channel = request.match_info.get("channel", "").lower()
+        segment = request.match_info.get("segment", "")
+        if ".." in segment or "/" in segment or not segment.endswith(".ts"):
+            return web.Response(text="Invalid segment", status=400)
+        s = orch.sessions[channel]
+        seg_path = os.path.join(s.buffer.shm_dir, segment)
+        if not os.path.exists(seg_path):
+            return web.Response(text="Not found", status=404)
+        return web.FileResponse(seg_path, headers={"Content-Type": "video/MP2T"})
+
+    app.router.add_get("/api/sessions/{channel}/live.m3u8", get_live_playlist_handler)
+    app.router.add_get("/api/sessions/{channel}/segments/{segment}", get_live_segment_handler)
+
+    client = TestClient(TestServer(app))
+    await client.start_server()
+
+    # Test playlist response
+    resp = await client.get("/api/sessions/teststream/live.m3u8")
+    assert resp.status == 200
+    text = await resp.text()
+    assert "#EXTM3U" in text
+    assert "/api/sessions/teststream/segments/seg_00.ts" in text
+
+    # Test segment response
+    seg_resp = await client.get("/api/sessions/teststream/segments/seg_00.ts")
+    assert seg_resp.status == 200
+    content = await seg_resp.read()
+    assert content == b"dummy ts content 1"
+
+    # Test non-existent session
+    bad_sess_resp = await client.get("/api/sessions/nonexistent/live.m3u8")
+    assert bad_sess_resp.status == 404
+
+    await client.close()
