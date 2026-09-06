@@ -17,6 +17,7 @@ from services.heuristics.audio_monitor import AudioDecibelMonitor
 from services.heuristics.ocr_engine import BoundedRegionOCR
 from services.heuristics.gate_evaluator import GateEvaluator
 from services.heuristics.chat_descriptor import LocalChatDescriptorService
+from services.heuristics.screen_summarizer import ScreenStateSummarizerService
 from services.processor.slicer import SegmentSlicer
 from services.processor.transcriber import AudioTranscriber
 from services.processor.boundary_ai import BoundaryOptimizer
@@ -90,16 +91,24 @@ class StreamSession:
             post_event_delay_seconds=POST_DELAY_SEC,
         )
 
-        # 6. Local Chat State Descriptor Service
+        # 6. Local Chat State Descriptor Service (Disabled by default, superseded by on-demand Screen State Summarizer)
         self.chat_descriptor_service = LocalChatDescriptorService(
             interval_seconds=DESCRIPTOR_INTERVAL_SEC,
             gemini_api_key=os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or "",
             gemini_model=os.getenv("GEMINI_MODEL", "gemini-3.6-flash"),
             local_api_base_url=LOCAL_LLM_URL,
             local_model_name=LOCAL_LLM_MODEL,
+            enabled=False,
         )
         self.last_descriptor_time: float = time.time()
         self.latest_description: Optional[dict] = None
+
+        # 7. On-Demand Multimodal Screen State Summarizer Service
+        self.screen_summarizer = ScreenStateSummarizerService(
+            gemini_api_key=os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or "",
+            gemini_model=os.getenv("GEMINI_MODEL", "gemini-3.6-flash"),
+        )
+        self.latest_screen_summary: Optional[dict] = None
 
         # Telemetry metrics
         self.extra_telemetry = {
@@ -205,6 +214,7 @@ class StreamSession:
             "total_messages": calc.get("total_messages", 0),
             "buffered_segments": self.buffer.get_segment_count() if self.buffer else 0,
             "latest_chat_description": self.latest_description,
+            "latest_screen_summary": self.latest_screen_summary,
         }
 
 
@@ -879,6 +889,47 @@ class StreamClipperOrchestrator:
 
         app.router.add_get("/api/descriptors", get_descriptors_handler)
         app.router.add_post("/api/settings/chat-descriptor", post_settings_descriptor_handler)
+
+        async def post_summarize_screen_handler(request):
+            """On-demand multimodal screen & chat summarization."""
+            try:
+                channel = request.match_info.get("channel") or request.query.get("channel")
+                if not channel and request.can_read_body:
+                    try:
+                        body = await request.json()
+                        channel = body.get("channel")
+                    except Exception:
+                        pass
+
+                if not channel:
+                    channel = list(self.sessions.keys())[0] if self.sessions else None
+
+                if not channel or channel.lower() not in self.sessions:
+                    return web.json_response({"error": f"Channel '{channel}' is not actively monitored"}, status=404)
+
+                session = self.sessions[channel.lower()]
+                messages = list(session.chat_engine.recent_messages) if session.chat_engine else []
+
+                result = await session.screen_summarizer.summarize_screen(
+                    channel=session.channel,
+                    messages=messages,
+                )
+                session.latest_screen_summary = result
+                await asyncio.to_thread(self.db.save_screen_summary, result)
+                return web.json_response(result)
+            except Exception as e:
+                logger.error("[LocalServer] Error summarizing screen: %s", e, exc_info=True)
+                return web.json_response({"error": str(e)}, status=500)
+
+        async def get_screen_summaries_handler(request):
+            limit = int(request.query.get("limit", 10))
+            channel = request.query.get("channel")
+            summaries = await asyncio.to_thread(self.db.get_recent_screen_summaries, channel, limit)
+            return web.json_response(summaries)
+
+        app.router.add_post("/api/sessions/{channel}/summarize-screen", post_summarize_screen_handler)
+        app.router.add_post("/api/summarize-screen", post_summarize_screen_handler)
+        app.router.add_get("/api/screen-summaries", get_screen_summaries_handler)
 
         # Static mounts
         app.router.add_static("/clips", clips_dir)

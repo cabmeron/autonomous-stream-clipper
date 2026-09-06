@@ -3,5 +3,6 @@ from services.heuristics.audio_monitor import AudioDecibelMonitor
 from services.heuristics.ocr_engine import BoundedRegionOCR
 from services.heuristics.gate_evaluator import GateEvaluator
 from services.heuristics.chat_descriptor import LocalChatDescriptorService
+from services.heuristics.screen_summarizer import ScreenStateSummarizerService
 
-__all__ = ["AudioDecibelMonitor", "BoundedRegionOCR", "GateEvaluator", "LocalChatDescriptorService"]
+__all__ = ["AudioDecibelMonitor", "BoundedRegionOCR", "GateEvaluator", "LocalChatDescriptorService", "ScreenStateSummarizerService"]

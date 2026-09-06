@@ -66,6 +66,20 @@ class DatabaseRepository:
             """)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_descriptors_channel ON chat_descriptors(channel_name);")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_descriptors_created ON chat_descriptors(created_at DESC);")
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS screen_summaries (
+                    id TEXT PRIMARY KEY,
+                    channel_name TEXT NOT NULL,
+                    summary TEXT NOT NULL,
+                    image_b64 TEXT,
+                    message_count INTEGER NOT NULL,
+                    model_name TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_summaries_channel ON screen_summaries(channel_name);")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_summaries_created ON screen_summaries(created_at DESC);")
             conn.commit()
         logger.info("[Database] Local SQLite database ready at: %s (WAL mode enabled)", self._sqlite_path)
 
@@ -185,6 +199,42 @@ class DatabaseRepository:
                 )
             else:
                 cursor.execute("SELECT * FROM chat_descriptors ORDER BY created_at DESC LIMIT ?", (limit,))
+            rows = cursor.fetchall()
+            return [dict(r) for r in rows]
+
+    def save_screen_summary(self, data: dict) -> str:
+        """Saves an on-demand screen state summary into SQLite."""
+        record_id = data.get("id") or str(uuid.uuid4())
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO screen_summaries (
+                    id, channel_name, summary, image_b64, message_count, model_name
+                ) VALUES (?, ?, ?, ?, ?, ?)
+            """, (
+                record_id,
+                data.get("channel_name", "").lower(),
+                data.get("summary", ""),
+                data.get("image_b64"),
+                data.get("message_count", 0),
+                data.get("model_name", "gemini-3.6-flash"),
+            ))
+            conn.commit()
+        logger.info("[Database] Saved screen summary %s for #%s", record_id, data.get("channel_name"))
+        return record_id
+
+    def get_recent_screen_summaries(self, channel: Optional[str] = None, limit: int = 10) -> List[Dict]:
+        """Retrieves recent screen summaries, optionally filtered by channel."""
+        with self._get_connection() as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            if channel:
+                cursor.execute(
+                    "SELECT * FROM screen_summaries WHERE LOWER(channel_name) = ? ORDER BY created_at DESC LIMIT ?",
+                    (channel.lower(), limit),
+                )
+            else:
+                cursor.execute("SELECT * FROM screen_summaries ORDER BY created_at DESC LIMIT ?", (limit,))
             rows = cursor.fetchall()
             return [dict(r) for r in rows]
 
