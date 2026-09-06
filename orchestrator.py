@@ -948,22 +948,38 @@ class StreamClipperOrchestrator:
             recent = usable[-5:]
             target_duration = getattr(session.buffer, "segment_time", 10)
 
+            if not hasattr(session, "hls_media_sequence"):
+                session.hls_media_sequence = 0
+                session.hls_last_first_seg = None
+
+            first_seg = recent[0] if recent else None
+            if session.hls_last_first_seg and first_seg != session.hls_last_first_seg:
+                session.hls_media_sequence += 1
+            session.hls_last_first_seg = first_seg
+
             lines = [
                 "#EXTM3U",
                 "#EXT-X-VERSION:3",
                 f"#EXT-X-TARGETDURATION:{target_duration}",
-                f"#EXT-X-MEDIA-SEQUENCE:{int(time.time() // target_duration)}",
+                f"#EXT-X-MEDIA-SEQUENCE:{session.hls_media_sequence}",
             ]
             for seg_path in recent:
                 seg_name = os.path.basename(seg_path)
+                try:
+                    mtime = int(os.path.getmtime(seg_path))
+                except OSError:
+                    mtime = 0
                 lines.append(f"#EXTINF:{target_duration}.0,")
-                lines.append(f"/api/sessions/{channel}/segments/{seg_name}")
+                lines.append(f"/api/sessions/{channel}/segments/{seg_name}?t={mtime}")
 
             playlist_content = "\n".join(lines) + "\n"
             return web.Response(
                 text=playlist_content,
                 content_type="application/vnd.apple.mpegurl",
-                headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+                headers={
+                    "Cache-Control": "no-cache, no-store, must-revalidate",
+                    "Access-Control-Allow-Origin": "*",
+                },
             )
 
         async def get_live_segment_handler(request):
@@ -980,13 +996,21 @@ class StreamClipperOrchestrator:
             seg_path = os.path.join(session.buffer.shm_dir, segment)
             if not os.path.exists(seg_path):
                 return web.Response(text="Segment not found", status=404)
-            return web.FileResponse(seg_path, headers={"Content-Type": "video/MP2T"})
+            return web.FileResponse(
+                seg_path,
+                headers={
+                    "Content-Type": "video/MP2T",
+                    "Access-Control-Allow-Origin": "*",
+                    "Cache-Control": "public, max-age=3600",
+                },
+            )
 
         app.router.add_get("/api/sessions/{channel}/live.m3u8", get_live_playlist_handler)
         app.router.add_get("/api/sessions/{channel}/segments/{segment}", get_live_segment_handler)
 
         # Static mounts
         app.router.add_static("/clips", clips_dir)
+        app.router.add_static("/static", static_dir)
         app.router.add_static("/", static_dir)
 
         self.http_runner = web.AppRunner(app)

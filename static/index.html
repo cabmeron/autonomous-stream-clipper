@@ -4,8 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Autonomous Stream Clipper - Multi-Session HUD</title>
+  <script src="/hls.min.js"></script>
   <script src="https://player.twitch.tv/js/embed/v1.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/hls.js@1"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -606,6 +606,26 @@
       color: #38bdf8;
       box-shadow: 0 0 10px rgba(56, 189, 248, 0.25);
     }
+    .btn-source-toggle {
+      background: rgba(168, 85, 247, 0.15);
+      border: 1px solid rgba(168, 85, 247, 0.4);
+      color: #c084fc;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 6px 12px;
+      border-radius: 6px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      transition: all 0.15s ease;
+      white-space: nowrap;
+    }
+    .btn-source-toggle:hover {
+      background: rgba(168, 85, 247, 0.3);
+      color: #e9d5ff;
+      box-shadow: 0 0 10px rgba(168, 85, 247, 0.3);
+    }
 
     /* HUD Audio & Volume Bar */
     .hud-volume-bar {
@@ -1109,6 +1129,10 @@
           <span id="theater-icon">⛶</span>
           <span id="theater-text">Full Stream</span>
         </button>
+        <button id="btn-source-toggle" class="btn-source-toggle" onclick="toggleStreamSource()" title="Switch Stream Player Source (Direct Stream Feed vs. Twitch Embed)">
+          <span id="source-icon">📺</span>
+          <span id="source-text">Source: Direct</span>
+        </button>
         <button id="btn-summarize-screen" class="btn-summarize-screen" onclick="triggerScreenSummary()" title="Capture current frame & chat to summarize screen state">
           <span id="summarize-btn-icon">📸</span>
           <span id="summarize-btn-text">Summarize Screen</span>
@@ -1308,6 +1332,7 @@
     let streamVolume = 1.0;
     let isTheaterMode = false;
     let activeHls = null;
+    let currentStreamSource = "direct";
 
     // In-memory cache for fast UI updates
     window.activeJobs = {};
@@ -1616,14 +1641,11 @@
       }
       frame.innerHTML = "";
 
-      const isSimulation = (channel === "test" || channel === "demo" || channel.startsWith("test"));
-
-      if (isSimulation) {
-        mountHlsPlayer(channel);
-        return;
+      if (currentStreamSource === "twitch") {
+        createTwitchPlayer(channel);
+      } else {
+        mountDirectHlsPlayer(channel);
       }
-
-      createTwitchPlayer(channel);
     }
 
     function createTwitchPlayer(channel) {
@@ -1688,31 +1710,81 @@
       updateAudioControlsUI();
     }
 
-    function mountHlsPlayer(channel) {
+    function mountDirectHlsPlayer(channel) {
       const frame = document.getElementById("twitch-frame");
+      if (!frame) return;
+
       frame.innerHTML = `
-        <video id="local-stream-player" controls autoplay playsinline style="width: 100%; height: 100%; object-fit: contain; background: #000; display: block;"></video>
+        <video id="live-stream-player" controls autoplay playsinline style="width: 100%; height: 100%; object-fit: contain; background: #000; display: block;"></video>
       `;
-      const videoEl = document.getElementById("local-stream-player");
+      const videoEl = document.getElementById("live-stream-player");
       const streamUrl = `/api/sessions/${channel}/live.m3u8`;
 
-      if (window.Hls && Hls.isSupported()) {
-        const hls = new Hls({ lowLatencyMode: true, maxBufferLength: 10 });
+      videoEl.muted = streamMuted;
+      videoEl.volume = streamMuted ? 0 : streamVolume;
+
+      videoEl.addEventListener("volumechange", () => {
+        streamMuted = videoEl.muted;
+        streamVolume = videoEl.volume;
+        updateAudioControlsUI();
+      });
+
+      const HlsClass = window.Hls;
+      if (HlsClass && HlsClass.isSupported()) {
+        const hls = new HlsClass({
+          enableWorker: true,
+          lowLatencyMode: true,
+          backBufferLength: 30,
+          maxBufferLength: 15,
+          liveSyncDurationCount: 2,
+          liveMaxLatencyDurationCount: 4,
+        });
         hls.loadSource(streamUrl);
         hls.attachMedia(videoEl);
         activeHls = hls;
-        hls.on(Hls.Events.MANIFEST_PARSED, () => {
-          videoEl.muted = streamMuted;
-          videoEl.volume = streamMuted ? 0 : streamVolume;
-          videoEl.play().catch(e => console.debug("HLS autoplay blocked:", e));
+
+        hls.on(HlsClass.Events.MANIFEST_PARSED, () => {
+          videoEl.play().catch(e => {
+            console.debug("Autoplay unmuted blocked by browser policy, click to unmute:", e);
+            streamMuted = true;
+            updateAudioControlsUI();
+          });
+        });
+
+        hls.on(HlsClass.Events.ERROR, (event, data) => {
+          if (data.fatal) {
+            console.warn("HLS player error:", data.type);
+            switch (data.type) {
+              case HlsClass.ErrorTypes.NETWORK_ERROR:
+                hls.startLoad();
+                break;
+              case HlsClass.ErrorTypes.MEDIA_ERROR:
+                hls.recoverMediaError();
+                break;
+              default:
+                hls.destroy();
+                break;
+            }
+          }
         });
       } else if (videoEl.canPlayType("application/vnd.apple.mpegurl")) {
         videoEl.src = streamUrl;
-        videoEl.muted = streamMuted;
-        videoEl.volume = streamMuted ? 0 : streamVolume;
-        videoEl.play().catch(e => console.debug("Safari HLS autoplay blocked:", e));
+        videoEl.play().catch(e => {
+          console.debug("Native Safari HLS autoplay unmuted blocked:", e);
+          streamMuted = true;
+          updateAudioControlsUI();
+        });
       }
       updateAudioControlsUI();
+    }
+
+    function toggleStreamSource() {
+      currentStreamSource = currentStreamSource === "direct" ? "twitch" : "direct";
+      const srcText = document.getElementById("source-text");
+      const srcIcon = document.getElementById("source-icon");
+      if (srcText) srcText.innerText = currentStreamSource === "direct" ? "Source: Direct" : "Source: Twitch";
+      if (srcIcon) srcIcon.innerText = currentStreamSource === "direct" ? "📺" : "🟣";
+      if (activeTab) mountStreamPlayer(activeTab);
     }
 
     function toggleStreamAudio() {
@@ -1731,19 +1803,19 @@
     }
 
     function applyAudioSettings() {
+      const videoEl = document.getElementById("live-stream-player");
+      if (videoEl) {
+        videoEl.muted = streamMuted;
+        videoEl.volume = streamMuted ? 0 : streamVolume;
+        if (!streamMuted) videoEl.play().catch(() => {});
+      }
       if (twitchPlayer && typeof twitchPlayer.setMuted === "function") {
         try {
           twitchPlayer.setMuted(streamMuted);
           twitchPlayer.setVolume(streamMuted ? 0 : streamVolume);
         } catch (e) {
-          console.debug("Twitch player audio update error:", e);
+          console.debug("Twitch audio update error:", e);
         }
-      }
-      const videoEl = document.getElementById("local-stream-player");
-      if (videoEl) {
-        videoEl.muted = streamMuted;
-        videoEl.volume = streamMuted ? 0 : streamVolume;
-        if (!streamMuted) videoEl.play().catch(() => {});
       }
       updateAudioControlsUI();
     }
