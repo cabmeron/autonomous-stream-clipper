@@ -168,7 +168,12 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
         temp_ass = None
         temp_badge = None
-        inputs = ["-ss", str(cut_start), "-i", source_path]
+        inputs = [
+            "-fflags", "+genpts+discardcorrupt",
+            "-err_detect", "ignore_err",
+            "-ss", str(cut_start),
+            "-i", source_path,
+        ]
         filter_parts = []
         current_pad = "[0:v]"
 
@@ -214,13 +219,17 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             "-pix_fmt", "yuv420p",
             "-c:a", "aac",
             "-b:a", "192k",
+            "-avoid_negative_ts", "make_zero",
             "-y", output_path,
         ]
 
         mode_str = "9:16 vertical" if crop_vertical else "Full-Sized (Uncropped)"
         logger.info("[Render] Rendering clip [%.1fs - %.1fs] -> %s (Mode: %s, encoder: %s)", cut_start, cut_end, output_path, mode_str, encoder)
         try:
-            subprocess.run(cmd, check=True, timeout=90)
+            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=90)
+            if res.returncode != 0:
+                logger.error("[Render] Rendering failed (code %d): %s", res.returncode, res.stderr)
+                return False
             success = os.path.exists(output_path) and os.path.getsize(output_path) > 0
             if success:
                 logger.info("[Render] Render complete: %s (%d bytes)", output_path, os.path.getsize(output_path))
@@ -261,8 +270,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             "-y", thumb_path,
         ]
         try:
-            subprocess.run(cmd, check=True, timeout=10)
-            return os.path.exists(thumb_path)
+            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=10)
+            return os.path.exists(thumb_path) and os.path.getsize(thumb_path) > 0
         except Exception as e:
             logger.error("[Render] Failed to extract thumbnail: %s", e)
             return False

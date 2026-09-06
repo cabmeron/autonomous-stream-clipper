@@ -68,9 +68,14 @@ class SegmentSlicer:
                 "-safe", "0",
                 "-i", concat_list,
                 "-c", "copy",
+                "-fflags", "+genpts",
+                "-avoid_negative_ts", "make_zero",
                 "-y", output_file,
             ]
-            subprocess.run(cmd, check=True, timeout=15)
+            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=15)
+            if res.returncode != 0:
+                logger.error("[Slicer] Failed to concatenate segments: %s", res.stderr)
+                return None
             logger.info("[Slicer] Successfully created %s from %d segments", output_file, len(selected))
             return output_file
         except Exception as e:
