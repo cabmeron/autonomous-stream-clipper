@@ -2,14 +2,47 @@ import glob
 import logging
 import os
 import platform
+import re
 import shutil
 import subprocess
 import sys
 import threading
 import time
 from typing import List, Optional
+from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
+
+
+def clean_channel_name(raw: str) -> str:
+    """Extracts a normalized alphanumeric Twitch channel name from raw strings, URLs, or tags.
+
+    Examples:
+        'https://www.twitch.tv/ponden' -> 'ponden'
+        'twitch.tv/ponden/'           -> 'ponden'
+        '#marlon'                     -> 'marlon'
+        '@marlon'                     -> 'marlon'
+        'zarbex'                      -> 'zarbex'
+    """
+    if not raw:
+        return ""
+    s = str(raw).strip()
+    lower_s = s.lower()
+    if "twitch.tv/" in lower_s:
+        s = lower_s.split("twitch.tv/", 1)[1]
+        s = s.split("?")[0].split("#")[0].split("/")[0]
+    elif lower_s.startswith("http://") or lower_s.startswith("https://"):
+        try:
+            p = urlparse(s)
+            parts = [part for part in p.path.split("/") if part]
+            if parts:
+                s = parts[0]
+        except Exception:
+            pass
+    s = re.sub(r"^[@#]+", "", s).strip()
+    s = s.split("?")[0].split("/")[0]
+    s = re.sub(r"[^a-zA-Z0-9_]", "", s)
+    return s.lower()
 
 
 def get_default_shm_dir() -> str:
@@ -43,7 +76,7 @@ class StreamRingBuffer:
         segment_time: int = 10,
         simulate: bool = False,
     ):
-        self.channel = channel.lower().lstrip("#")
+        self.channel = clean_channel_name(channel)
         base_dir = shm_dir or get_default_shm_dir()
         self.shm_dir = os.path.join(base_dir, self.channel)
         self.window_seconds = window_seconds

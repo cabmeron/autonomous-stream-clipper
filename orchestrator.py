@@ -11,7 +11,7 @@ from typing import Dict, List, Optional
 from dotenv import load_dotenv
 from aiohttp import web
 
-from services.ingest.stream_buffer import StreamRingBuffer
+from services.ingest.stream_buffer import StreamRingBuffer, clean_channel_name
 from services.ingest.twitch_irc import TwitchChatVelocityEngine
 from services.heuristics.audio_monitor import AudioDecibelMonitor
 from services.heuristics.ocr_engine import BoundedRegionOCR
@@ -49,7 +49,7 @@ class StreamSession:
     """Represents an independent monitoring session for a single Twitch channel."""
 
     def __init__(self, channel: str, orchestrator: "StreamClipperOrchestrator"):
-        self.channel = channel.lower().lstrip("#").strip()
+        self.channel = clean_channel_name(channel)
         self.orchestrator = orchestrator
 
         # 1. Video Buffer
@@ -393,9 +393,9 @@ class StreamClipperOrchestrator:
 
     async def add_session(self, channel: str) -> dict:
         """Adds a new channel session and begins ingestion."""
-        clean = channel.lower().lstrip("#").strip()
+        clean = clean_channel_name(channel)
         if not clean:
-            raise ValueError("Channel name cannot be empty")
+            raise ValueError("Channel name or Twitch URL cannot be empty or invalid")
 
         if clean in self.sessions:
             logger.info("[Orchestrator] Channel #%s already active", clean)
@@ -411,7 +411,7 @@ class StreamClipperOrchestrator:
 
     async def remove_session(self, channel: str) -> bool:
         """Stops and removes an existing channel session."""
-        clean = channel.lower().lstrip("#").strip()
+        clean = clean_channel_name(channel)
         if clean in self.sessions:
             session = self.sessions.pop(clean)
             session.stop()
@@ -443,7 +443,7 @@ class StreamClipperOrchestrator:
 
     async def set_channel(self, new_channel: Optional[str]) -> dict:
         """Single-channel compatibility wrapper."""
-        clean = new_channel.lower().lstrip("#").strip() if new_channel else ""
+        clean = clean_channel_name(new_channel) if new_channel else ""
         if not clean:
             for ch in list(self.sessions.keys()):
                 await self.remove_session(ch)
@@ -453,7 +453,7 @@ class StreamClipperOrchestrator:
 
     async def trigger_manual_clip(self, channel: str) -> dict:
         """Manually captures the newest 60 seconds from the rolling stream buffer."""
-        clean = channel.lower().lstrip("#").strip()
+        clean = clean_channel_name(channel)
         session = self.sessions.get(clean)
         if not session:
             raise ValueError(f"Stream #{clean} is not active. Please add or select an active session.")
@@ -933,8 +933,8 @@ class StreamClipperOrchestrator:
 
         async def get_live_playlist_handler(request):
             """Generates a live HLS m3u8 playlist from active TS segments in the RAM ring buffer."""
-            channel = request.match_info.get("channel", "").lower()
-            if channel not in self.sessions:
+            channel = clean_channel_name(request.match_info.get("channel", ""))
+            if not channel or channel not in self.sessions:
                 return web.Response(text="#EXTM3U\n", status=404, content_type="application/vnd.apple.mpegurl")
             session = self.sessions[channel]
             if not session.buffer or not os.path.exists(session.buffer.shm_dir):
@@ -984,11 +984,11 @@ class StreamClipperOrchestrator:
 
         async def get_live_segment_handler(request):
             """Serves a raw MPEG-TS video segment from the RAM ring buffer."""
-            channel = request.match_info.get("channel", "").lower()
+            channel = clean_channel_name(request.match_info.get("channel", ""))
             segment = request.match_info.get("segment", "")
             if ".." in segment or "/" in segment or not segment.endswith(".ts"):
                 return web.Response(text="Invalid segment", status=400)
-            if channel not in self.sessions:
+            if not channel or channel not in self.sessions:
                 return web.Response(text="Session not found", status=404)
             session = self.sessions[channel]
             if not session.buffer or not os.path.exists(session.buffer.shm_dir):

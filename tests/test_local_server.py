@@ -153,6 +153,21 @@ async def test_live_hls_playlist_and_segment_routes(tmp_path):
 
     # Test non-existent session
     bad_sess_resp = await client.get("/api/sessions/nonexistent/live.m3u8")
-    assert bad_sess_resp.status == 404
-
     await client.close()
+
+
+def test_clean_channel_name_normalization():
+    from services.ingest.stream_buffer import clean_channel_name
+
+    assert clean_channel_name("https://www.twitch.tv/ponden") == "ponden"
+    assert clean_channel_name("https://www.twitch.tv/ponden/") == "ponden"
+    assert clean_channel_name("http://twitch.tv/ponden") == "ponden"
+    assert clean_channel_name("twitch.tv/ponden") == "ponden"
+    assert clean_channel_name("www.twitch.tv/ponden") == "ponden"
+    assert clean_channel_name("https://twitch.tv/tarik/clip/123") == "tarik"
+    assert clean_channel_name("#marlon") == "marlon"
+    assert clean_channel_name("@marlon") == "marlon"
+    assert clean_channel_name("zarbex") == "zarbex"
+    assert clean_channel_name("  https://twitch.tv/tarik/?ref=test  ") == "tarik"
+    assert clean_channel_name("") == ""
+

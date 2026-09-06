@@ -1119,7 +1119,7 @@
         <div id="tab-strip"></div>
       </div>
       <div class="add-group">
-        <input id="channel-input" type="text" placeholder="Add channel (e.g. zarbex)" onkeydown="if(event.key==='Enter') addStreamSession();" />
+        <input id="channel-input" type="text" placeholder="Add channel or Twitch URL (e.g. zarbex or twitch.tv/zarbex)" onkeydown="if(event.key==='Enter') addStreamSession();" />
         <button class="btn-add" onclick="addStreamSession()">+ Add Stream</button>
         <button id="btn-audio-toggle" class="btn-audio-toggle active" onclick="toggleStreamAudio()" title="Toggle Stream Audio (Unmute / Mute)">
           <span id="top-audio-icon">🔊</span>
@@ -2015,10 +2015,31 @@
       latestScreenSummaryByChannel[activeTab] = summary;
     }
 
+    function sanitizeChannelName(input) {
+      if (!input) return "";
+      let s = String(input).trim().toLowerCase();
+      if (s.includes("twitch.tv/")) {
+        s = s.split("twitch.tv/")[1].split("?")[0].split("#")[0].split("/")[0];
+      } else if (s.startsWith("http://") || s.startsWith("https://")) {
+        try {
+          const url = new URL(s);
+          const parts = url.pathname.split("/").filter(Boolean);
+          if (parts.length > 0) s = parts[0];
+        } catch (e) {}
+      }
+      s = s.replace(/^[@#]+/, "").trim();
+      s = s.split("?")[0].split("/")[0];
+      s = s.replace(/[^a-z0-9_]/g, "");
+      return s;
+    }
+
     async function addStreamSession() {
       const input = document.getElementById("channel-input");
-      const channel = input.value.trim().toLowerCase().replace("#", "");
-      if (!channel) return;
+      const channel = sanitizeChannelName(input.value);
+      if (!channel) {
+        alert("Please enter a valid Twitch channel name or URL.");
+        return;
+      }
 
       // User gesture: enable unmuted audio
       streamMuted = false;

@@ -6,6 +6,7 @@ import random
 import time
 from typing import Callable, List, Optional
 import websockets
+from services.ingest.stream_buffer import clean_channel_name
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +39,7 @@ class TwitchChatVelocityEngine:
         spike_ratio_threshold: float = 3.0,
         instant_min_threshold: float = 10.0,
     ):
-        self.channel = channel.lower().lstrip("#")
+        self.channel = clean_channel_name(channel)
         self.on_spike = on_spike_callback
         self.spike_ratio_threshold = spike_ratio_threshold
         self.instant_min_threshold = instant_min_threshold
