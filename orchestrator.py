@@ -49,12 +49,13 @@ LOCAL_LLM_MODEL = os.getenv("LOCAL_LLM_MODEL", "llama3.2:1b")
 class StreamSession:
     """Represents an independent monitoring session for a single Twitch channel."""
 
-    def __init__(self, channel: str, orchestrator: "StreamClipperOrchestrator"):
+    def __init__(self, channel: str, orchestrator: "StreamClipperOrchestrator", simulate: bool = False):
         self.channel = clean_channel_name(channel)
         self.orchestrator = orchestrator
+        self.simulate = simulate
 
         # 1. Video Buffer
-        self.buffer = StreamRingBuffer(self.channel)
+        self.buffer = StreamRingBuffer(self.channel, simulate=self.simulate)
 
         # 2. IRC Chat Velocity Engine
         self.chat_engine = TwitchChatVelocityEngine(
@@ -395,7 +396,7 @@ class StreamClipperOrchestrator:
         """Returns summary status for all active sessions."""
         return [sess.get_status() for sess in self.sessions.values()]
 
-    async def add_session(self, channel: str) -> dict:
+    async def add_session(self, channel: str, simulate: bool = False) -> dict:
         """Adds a new channel session and begins ingestion."""
         clean = clean_channel_name(channel)
         if not clean:
@@ -405,7 +406,11 @@ class StreamClipperOrchestrator:
             logger.info("[Orchestrator] Channel #%s already active", clean)
             return self.sessions[clean].get_status()
 
-        session = StreamSession(clean, self)
+        # Auto-detect simulation channel from naming patterns or explicit simulate flag
+        if simulate or clean.startswith("sim_") or "_reacts" in clean or "watch_" in clean or "react_" in clean:
+            simulate = True
+
+        session = StreamSession(clean, self, simulate=simulate)
         if self.running and self.loop:
             session.start(self.loop)
         self.sessions[clean] = session
@@ -736,7 +741,8 @@ class StreamClipperOrchestrator:
             try:
                 data = await request.json()
                 channel = data.get("channel", "")
-                res = await self.add_session(channel)
+                simulate = bool(data.get("simulate", False))
+                res = await self.add_session(channel, simulate=simulate)
                 return web.json_response(res)
             except ValueError as ve:
                 return web.json_response({"error": str(ve)}, status=400)

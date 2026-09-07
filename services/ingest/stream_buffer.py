@@ -54,13 +54,26 @@ def get_default_shm_dir() -> str:
 
 def resolve_streamlink_binary() -> str:
     """Locates the streamlink executable from the active Python virtualenv or system PATH."""
-    venv_bin = os.path.join(os.path.dirname(sys.executable), "streamlink")
-    if os.path.exists(venv_bin) and os.access(venv_bin, os.X_OK):
-        return venv_bin
+    candidates = [
+        os.path.join(os.path.dirname(sys.executable), "streamlink"),
+        shutil.which("streamlink"),
+        "/opt/homebrew/bin/streamlink",
+        "/usr/local/bin/streamlink",
+        os.path.join(os.getcwd(), "venv", "bin", "streamlink"),
+        os.path.join(os.getcwd(), ".venv", "bin", "streamlink"),
+        "/Users/user2/Documents/Projects/clipper/venv/bin/streamlink",
+        "/Users/user2/Documents/Projects/autonomous-stream-clipper/venv/bin/streamlink",
+    ]
+    for c in candidates:
+        if c and os.path.exists(c) and os.access(c, os.X_OK):
+            return c
 
-    which_bin = shutil.which("streamlink")
-    if which_bin:
-        return which_bin
+    for venv_py in (
+        os.path.join(os.getcwd(), "venv", "bin", "python3"),
+        "/Users/user2/Documents/Projects/clipper/venv/bin/python3",
+    ):
+        if os.path.exists(venv_py):
+            return f'"{venv_py}" -m streamlink'
 
     return f'"{sys.executable}" -m streamlink'
 
@@ -82,7 +95,19 @@ class StreamRingBuffer:
         self.window_seconds = window_seconds
         self.segment_time = segment_time
         self.segment_wrap = max(1, self.window_seconds // self.segment_time)
-        self.simulate = simulate or (self.channel in ("test", "demo", "test1", "test2") or os.getenv("SIMULATE_STREAM", "false").lower() == "true")
+
+        # Auto-detect simulation streams (demo, sim_, _reacts, watch_, or explicit simulate flag)
+        is_sim = (
+            simulate
+            or self.channel in ("test", "demo", "test1", "test2")
+            or self.channel.startswith("sim_")
+            or "_reacts" in self.channel
+            or "watch_" in self.channel
+            or "react_" in self.channel
+            or os.getenv("SIMULATE_STREAM", "false").lower() == "true"
+        )
+        self.simulate = bool(is_sim)
+        self.is_standby = False
 
         self.process: Optional[subprocess.Popen] = None
         self.running = False
@@ -96,13 +121,32 @@ class StreamRingBuffer:
         env["PATH"] = ":".join(p for p in paths if p)
         return env
 
+    def _resolve_live_m3u8(self) -> Optional[str]:
+        """Queries streamlink for the direct Twitch HLS playlist URL."""
+        streamlink_bin = resolve_streamlink_binary()
+        try:
+            res = subprocess.run(
+                f'{streamlink_bin} --stream-url "twitch.tv/{self.channel}" best',
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=7.0,
+                env=self._build_env(),
+            )
+            if res.returncode == 0 and res.stdout.strip().startswith("http"):
+                return res.stdout.strip()
+        except Exception as e:
+            logger.debug("[Buffer:%s] Error resolving stream URL: %s", self.channel, e)
+        return None
+
     def _start_ingest_process(self):
         """Starts the stream ingestion or simulation subprocess."""
         os.makedirs(self.shm_dir, exist_ok=True)
         out_pattern = os.path.join(self.shm_dir, "seg_%02d.ts")
 
         if self.simulate:
-            logger.info("[Buffer:%s] Running in SIMULATION mode (synthetic stream)...", self.channel)
+            self.is_standby = False
+            logger.info("[Buffer:%s] Running in SIMULATION mode (synthetic 1080p stream)...", self.channel)
             cmd = (
                 f'ffmpeg -hide_banner -loglevel error '
                 f'-re -f lavfi -i "testsrc=size=1920x1080:rate=30" '
@@ -113,14 +157,30 @@ class StreamRingBuffer:
                 f'-segment_wrap {self.segment_wrap} -y "{out_pattern}"'
             )
         else:
-            streamlink_bin = resolve_streamlink_binary()
-            cmd = (
-                f'{streamlink_bin} --retry-streams 15 --retry-open 5 '
-                f'"twitch.tv/{self.channel}" best -o - | '
-                f'ffmpeg -hide_banner -loglevel error -i - '
-                f'-c copy -f segment -segment_time {self.segment_time} '
-                f'-segment_wrap {self.segment_wrap} -y "{out_pattern}"'
-            )
+            # Check if live stream is actively broadcasting
+            live_url = self._resolve_live_m3u8()
+            if live_url:
+                self.is_standby = False
+                logger.info("[Buffer:%s] Live Twitch broadcast detected! Ingesting direct HLS stream...", self.channel)
+                cmd = (
+                    f'ffmpeg -hide_banner -loglevel error '
+                    f'-reconnect 1 -reconnect_at_eof 1 -reconnect_streamed 1 -reconnect_delay_max 5 '
+                    f'-i "{live_url}" '
+                    f'-c copy -f segment -segment_time {self.segment_time} '
+                    f'-segment_wrap {self.segment_wrap} -y "{out_pattern}"'
+                )
+            else:
+                self.is_standby = True
+                logger.info("[Buffer:%s] Channel is currently OFFLINE on Twitch. Running standby feed until stream goes live...", self.channel)
+                cmd = (
+                    f'ffmpeg -hide_banner -loglevel error '
+                    f'-re -f lavfi -i "testsrc=size=1920x1080:rate=30" '
+                    f'-f lavfi -i "sine=frequency=220:sample_rate=16000" '
+                    f'-c:v libx264 -preset ultrafast -tune zerolatency -pix_fmt yuv420p '
+                    f'-c:a aac -b:a 64k '
+                    f'-f segment -segment_time {self.segment_time} '
+                    f'-segment_wrap {self.segment_wrap} -y "{out_pattern}"'
+                )
 
         logger.info(
             "[Buffer:%s] Initializing ingest -> %d segments (%ds total) at %s",
@@ -138,15 +198,30 @@ class StreamRingBuffer:
         )
 
     def _watchdog_loop(self):
-        """Monitors the ingestion process and restarts if the stream disconnects."""
+        """Monitors the ingestion process and checks if offline streams go live."""
         while self.running:
+            if self.is_standby and not self.simulate:
+                # Channel was offline; check if it has gone live
+                live_url = self._resolve_live_m3u8()
+                if live_url:
+                    logger.info("[Buffer:%s] Channel has gone LIVE! Switching from standby to live Twitch feed...", self.channel)
+                    if self.process:
+                        try:
+                            if platform.system() != "Windows":
+                                os.killpg(os.getpgid(self.process.pid), 15)
+                            else:
+                                self.process.terminate()
+                        except Exception:
+                            pass
+                    self._start_ingest_process()
+
             if not self.is_alive():
                 if self.running:
-                    logger.info("[Buffer:%s] Stream offline or disconnected. Retrying in 15s...", self.channel)
-                    time.sleep(15)
+                    logger.info("[Buffer:%s] Ingest process ended. Restarting in 5s...", self.channel)
+                    time.sleep(5)
                     if self.running:
                         self._start_ingest_process()
-            time.sleep(2)
+            time.sleep(4)
 
     def start(self):
         """Starts ingestion and launches the background supervisor watchdog."""

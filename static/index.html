@@ -2513,7 +2513,11 @@
             console.warn("HLS player error:", data.type);
             switch (data.type) {
               case HlsClass.ErrorTypes.NETWORK_ERROR:
-                hls.startLoad();
+                setTimeout(() => {
+                  if (activeHls && activeTab === channel) {
+                    activeHls.startLoad();
+                  }
+                }, 1500);
                 break;
               case HlsClass.ErrorTypes.MEDIA_ERROR:
                 hls.recoverMediaError();
@@ -3496,10 +3500,12 @@
         hookBtn.disabled = true;
       }
       try {
+        const candObj = lastDiscoveredCandidates.find(c => c.login === channel);
+        const isSim = Boolean(candObj && candObj.is_simulation);
         const res = await fetch("/api/sessions", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ channel })
+          body: JSON.stringify({ channel, simulate: isSim })
         });
         const data = await res.json();
         if (res.ok) {
