@@ -342,6 +342,53 @@
       opacity: 0.5;
       cursor: not-allowed;
     }
+    .btn-discover-watchers {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      background: linear-gradient(135deg, #6366f1 0%, #4338ca 100%);
+      color: #ffffff;
+      border: 1px solid rgba(165, 180, 252, 0.4);
+      padding: 6px 14px;
+      border-radius: 8px;
+      font-size: 11.5px;
+      font-weight: 600;
+      cursor: pointer;
+      box-shadow: 0 2px 10px rgba(99, 102, 241, 0.35);
+      transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .btn-discover-watchers:hover {
+      background: linear-gradient(135deg, #818cf8 0%, #4f46e5 100%);
+      box-shadow: 0 4px 14px rgba(99, 102, 241, 0.55);
+      transform: translateY(-1px);
+    }
+    .btn-discover-watchers:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+      transform: none;
+    }
+    .btn-hud-watchers {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      background: rgba(99, 102, 241, 0.14);
+      border: 1px solid rgba(129, 140, 248, 0.35);
+      color: #a5b4fc;
+      padding: 7px 10px;
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .btn-hud-watchers:hover {
+      background: rgba(99, 102, 241, 0.24);
+      border-color: #818cf8;
+      color: #fff;
+    }
+
 
     /* Screen State Intel Widget (Center-Left) */
     .screen-intel-widget {
@@ -1108,6 +1155,607 @@
       cursor: pointer;
     }
     .btn-job-close:hover { background: rgba(255, 255, 255, 0.15); color: #fff; }
+
+    /* Watch-Party & Co-Stream Radar Modal */
+    #watch-party-modal {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(4, 7, 13, 0.88);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      z-index: 230;
+      align-items: center;
+      justify-content: center;
+    }
+    #watch-party-modal.active { display: flex; }
+    .radar-modal-content {
+      position: relative;
+      width: 840px;
+      max-width: 94vw;
+      max-height: 88vh;
+      background: #0b0f19;
+      border: 1px solid rgba(99, 102, 241, 0.35);
+      border-radius: 16px;
+      padding: 22px;
+      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.9), 0 0 35px rgba(99, 102, 241, 0.15);
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      color: #f1f5f9;
+      overflow: hidden;
+    }
+    .radar-modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      padding-bottom: 12px;
+    }
+    .radar-live-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 10px;
+      font-weight: 800;
+      color: #818cf8;
+      letter-spacing: 0.8px;
+      text-transform: uppercase;
+      background: rgba(99, 102, 241, 0.15);
+      border: 1px solid rgba(129, 140, 248, 0.3);
+      padding: 2px 8px;
+      border-radius: 100px;
+      margin-bottom: 4px;
+    }
+    .radar-ping-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #6366f1;
+      box-shadow: 0 0 8px #818cf8;
+      animation: pulse 1.2s infinite;
+    }
+    .radar-modal-title {
+      font-size: 18px;
+      font-weight: 800;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .radar-subtitle {
+      font-size: 12px;
+      color: #94a3b8;
+      margin-top: 2px;
+    }
+
+    /* Radar Controls & Search Bar */
+    .radar-controls-bar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 10px;
+      padding: 10px 14px;
+      flex-wrap: wrap;
+    }
+    .radar-input-group {
+      display: flex;
+      align-items: center;
+      background: rgba(0, 0, 0, 0.5);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 8px;
+      padding: 4px 10px;
+      flex: 1;
+      min-width: 200px;
+    }
+    .radar-input-group:focus-within {
+      border-color: #818cf8;
+      box-shadow: 0 0 10px rgba(99, 102, 241, 0.3);
+    }
+    .radar-input-prefix {
+      color: #818cf8;
+      font-weight: 700;
+      font-size: 14px;
+      margin-right: 4px;
+    }
+    .radar-input-group input {
+      background: transparent;
+      border: none;
+      color: #fff;
+      font-size: 13px;
+      font-family: inherit;
+      width: 100%;
+      outline: none;
+    }
+    .radar-action-buttons {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .btn-radar-primary {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: #6366f1;
+      color: #ffffff;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      box-shadow: 0 2px 10px rgba(99, 102, 241, 0.4);
+    }
+    .btn-radar-primary:hover { background: #4f46e5; }
+    .btn-radar-sim {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(255, 255, 255, 0.08);
+      color: #cbd5e1;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      padding: 8px 14px;
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .btn-radar-sim:hover { background: rgba(255, 255, 255, 0.14); color: #fff; }
+    .btn-radar-autohook {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: linear-gradient(135deg, #059669 0%, #047857 100%);
+      color: #fff;
+      border: 1px solid rgba(52, 211, 153, 0.4);
+      padding: 8px 16px;
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      box-shadow: 0 2px 10px rgba(5, 150, 105, 0.3);
+    }
+    .btn-radar-autohook:hover { background: linear-gradient(135deg, #10b981 0%, #059669 100%); }
+    .btn-radar-autohook:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    /* Animated Scanning Display */
+    .radar-scanning-stage {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 30px 20px;
+      gap: 16px;
+      background: radial-gradient(circle at center, rgba(99, 102, 241, 0.08) 0%, rgba(0, 0, 0, 0.3) 70%);
+      border: 1px dashed rgba(99, 102, 241, 0.3);
+      border-radius: 12px;
+    }
+    .radar-scope-container {
+      display: flex;
+      align-items: center;
+      gap: 24px;
+    }
+    .radar-scope {
+      position: relative;
+      width: 100px;
+      height: 100px;
+      border-radius: 50%;
+      background: #060913;
+      border: 2px solid rgba(99, 102, 241, 0.5);
+      box-shadow: 0 0 20px rgba(99, 102, 241, 0.25), inset 0 0 15px rgba(99, 102, 241, 0.2);
+      overflow: hidden;
+      flex-shrink: 0;
+    }
+    .radar-scope::before {
+      content: "";
+      position: absolute;
+      inset: 20px;
+      border-radius: 50%;
+      border: 1px dashed rgba(99, 102, 241, 0.35);
+    }
+    .radar-sweep {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      border-radius: 50%;
+      background: conic-gradient(from 0deg, rgba(99, 102, 241, 0) 0deg, rgba(99, 102, 241, 0.5) 300deg, rgba(129, 140, 248, 0.9) 360deg);
+      animation: radarSweep 2s linear infinite;
+    }
+    .radar-crosshair-h {
+      position: absolute;
+      top: 50%;
+      left: 0;
+      right: 0;
+      height: 1px;
+      background: rgba(99, 102, 241, 0.25);
+    }
+    .radar-crosshair-v {
+      position: absolute;
+      left: 50%;
+      top: 0;
+      bottom: 0;
+      width: 1px;
+      background: rgba(99, 102, 241, 0.25);
+    }
+    .radar-blip {
+      position: absolute;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #4ade80;
+      box-shadow: 0 0 8px #4ade80;
+      animation: blipPulse 1.8s infinite ease-in-out;
+    }
+    .radar-blip.blip-1 { top: 30%; left: 65%; animation-delay: 0.3s; }
+    .radar-blip.blip-2 { top: 68%; left: 35%; animation-delay: 0.9s; }
+    .radar-blip.blip-3 { top: 25%; left: 25%; animation-delay: 1.4s; background: #fbbf24; box-shadow: 0 0 8px #fbbf24; }
+
+    @keyframes radarSweep {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    @keyframes blipPulse {
+      0%, 100% { transform: scale(1); opacity: 0.9; }
+      50% { transform: scale(1.6); opacity: 0.3; }
+    }
+
+    .radar-scan-status {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .radar-scan-headline {
+      font-size: 15px;
+      font-weight: 700;
+      color: #fff;
+    }
+    .radar-scan-step {
+      font-size: 12px;
+      color: #818cf8;
+      font-family: monospace;
+    }
+
+    /* Radar Stats Bar */
+    .radar-stats-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: 10px;
+      padding: 8px 16px;
+    }
+    .radar-stat-item {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .radar-stat-label {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      color: #64748b;
+      font-weight: 700;
+    }
+    .radar-stat-val {
+      font-size: 14px;
+      font-weight: 800;
+      color: #f1f5f9;
+    }
+
+    /* Radar Candidate Results Grid */
+    .radar-results-container {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      overflow-y: auto;
+      max-height: calc(88vh - 250px);
+      padding-right: 4px;
+    }
+    .cand-card {
+      display: flex;
+      gap: 16px;
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 12px;
+      padding: 14px;
+      transition: all 0.2s ease;
+      align-items: flex-start;
+    }
+    .cand-card:hover {
+      background: rgba(255, 255, 255, 0.05);
+      border-color: rgba(99, 102, 241, 0.4);
+    }
+    .cand-card.hook-in {
+      border-left: 4px solid #10b981;
+    }
+    .cand-card.potential {
+      border-left: 4px solid #f59e0b;
+    }
+    .cand-card.dismiss {
+      border-left: 4px solid #475569;
+      opacity: 0.72;
+    }
+    .cand-left {
+      position: relative;
+      width: 140px;
+      flex-shrink: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .cand-thumb-box {
+      position: relative;
+      width: 140px;
+      height: 79px;
+      background: #000;
+      border-radius: 8px;
+      overflow: hidden;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+    .cand-thumb {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+    .cand-thumb-fallback {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #1e293b;
+      color: #64748b;
+      font-size: 24px;
+    }
+    .cand-viewers-pill {
+      position: absolute;
+      bottom: 4px;
+      left: 4px;
+      background: rgba(0, 0, 0, 0.75);
+      color: #ef4444;
+      font-size: 10px;
+      font-weight: 700;
+      padding: 2px 5px;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      gap: 3px;
+    }
+    .cand-sim-badge {
+      position: absolute;
+      top: 4px;
+      left: 4px;
+      background: rgba(99, 102, 241, 0.85);
+      color: #fff;
+      font-size: 9px;
+      font-weight: 800;
+      padding: 1px 4px;
+      border-radius: 3px;
+      letter-spacing: 0.4px;
+    }
+    .cand-streamer-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .cand-avatar {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      object-fit: cover;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+    }
+    .cand-streamer-names {
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+    .cand-display-name {
+      font-size: 12px;
+      font-weight: 700;
+      color: #fff;
+    }
+    .cand-login-handle {
+      font-size: 10px;
+      color: #64748b;
+    }
+    .cand-center {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      min-width: 0;
+    }
+    .cand-meta-line {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .cand-game-tag {
+      font-size: 11px;
+      color: #cbd5e1;
+      background: rgba(255, 255, 255, 0.06);
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-weight: 600;
+    }
+    .cand-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: #e2e8f0;
+      line-height: 1.4;
+      word-break: break-word;
+    }
+    .cand-title mark.kw-match {
+      background: rgba(99, 102, 241, 0.35);
+      color: #c7d2fe;
+      padding: 1px 4px;
+      border-radius: 3px;
+      font-weight: 700;
+    }
+    .cand-title mark.chan-match {
+      background: rgba(56, 189, 248, 0.35);
+      color: #7dd3fc;
+      padding: 1px 4px;
+      border-radius: 3px;
+      font-weight: 800;
+    }
+
+    /* Agent Determination Callout Box */
+    .cand-agent-box {
+      background: rgba(15, 23, 42, 0.7);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 8px;
+      padding: 8px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .cand-agent-box.hook-in {
+      border-color: rgba(16, 185, 129, 0.3);
+      background: rgba(16, 185, 129, 0.04);
+    }
+    .cand-agent-box.potential {
+      border-color: rgba(245, 158, 11, 0.3);
+      background: rgba(245, 158, 11, 0.04);
+    }
+    .cand-agent-box.dismiss {
+      border-color: rgba(100, 116, 139, 0.2);
+    }
+    .cand-agent-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .det-badge {
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.6px;
+      padding: 3px 8px;
+      border-radius: 5px;
+      text-transform: uppercase;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .det-badge.hook {
+      background: rgba(16, 185, 129, 0.18);
+      border: 1px solid #10b981;
+      color: #34d399;
+    }
+    .det-badge.potential {
+      background: rgba(245, 158, 11, 0.18);
+      border: 1px solid #f59e0b;
+      color: #fbbf24;
+    }
+    .det-badge.dismiss {
+      background: rgba(148, 163, 184, 0.1);
+      border: 1px solid #64748b;
+      color: #94a3b8;
+    }
+    .cand-conf-box {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      font-weight: 700;
+      color: #cbd5e1;
+    }
+    .cand-conf-bar-track {
+      width: 60px;
+      height: 6px;
+      background: rgba(0, 0, 0, 0.5);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+    .cand-conf-bar-fill {
+      height: 100%;
+      border-radius: 3px;
+    }
+    .cand-reasoning {
+      font-size: 11.5px;
+      color: #94a3b8;
+      line-height: 1.45;
+    }
+
+    /* Candidate Action Column */
+    .cand-right {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      align-items: flex-end;
+      flex-shrink: 0;
+      min-width: 120px;
+    }
+    .btn-hook-stream {
+      background: #10b981;
+      color: #fff;
+      font-weight: 700;
+      font-size: 11.5px;
+      border: none;
+      border-radius: 6px;
+      padding: 7px 14px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      white-space: nowrap;
+      transition: all 0.15s ease;
+      box-shadow: 0 2px 8px rgba(16, 185, 129, 0.3);
+    }
+    .btn-hook-stream:hover {
+      background: #059669;
+      transform: translateY(-1px);
+    }
+    .btn-hook-stream.is-hooked {
+      background: rgba(255, 255, 255, 0.08);
+      color: #94a3b8;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      cursor: default;
+      box-shadow: none;
+      transform: none;
+    }
+    .btn-cand-twitch {
+      font-size: 11px;
+      color: #818cf8;
+      text-decoration: none;
+      padding: 4px 8px;
+      border-radius: 4px;
+      transition: background 0.15s ease;
+    }
+    .btn-cand-twitch:hover {
+      background: rgba(99, 102, 241, 0.15);
+      color: #a5b4fc;
+    }
+    .radar-empty-state {
+      padding: 40px 20px;
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+      color: #94a3b8;
+    }
+    .radar-empty-title {
+      font-size: 16px;
+      font-weight: 700;
+      color: #e2e8f0;
+    }
+    .radar-empty-desc {
+      font-size: 12px;
+      max-width: 440px;
+      line-height: 1.6;
+    }
+
   </style>
 </head>
 <body>
@@ -1121,6 +1769,10 @@
       <div class="add-group">
         <input id="channel-input" type="text" placeholder="Add channel or Twitch URL (e.g. zarbex or twitch.tv/zarbex)" onkeydown="if(event.key==='Enter') addStreamSession();" />
         <button class="btn-add" onclick="addStreamSession()">+ Add Stream</button>
+        <button id="btn-discover-watchers" class="btn-discover-watchers" onclick="openWatchPartyModal()" title="Radar search for streamers watching or reacting to this channel">
+          <span id="watchers-btn-icon">📡</span>
+          <span id="watchers-btn-text">Watch-Party Radar</span>
+        </button>
         <button id="btn-audio-toggle" class="btn-audio-toggle active" onclick="toggleStreamAudio()" title="Toggle Stream Audio (Unmute / Mute)">
           <span id="top-audio-icon">🔊</span>
           <span id="top-audio-text">Audio: ON</span>
@@ -1234,9 +1886,12 @@
         <span id="ocr-balance" class="metric-val" style="color: #34d399;">$0.00</span>
       </div>
 
-      <div style="margin-top: 12px; margin-bottom: 6px;">
+      <div style="margin-top: 12px; margin-bottom: 6px; display: flex; flex-direction: column; gap: 6px;">
         <button id="btn-hud-summarize" class="btn-hud-summarize" onclick="triggerScreenSummary()" title="Capture current frame & chat to summarize screen state">
           📸 Summarize Screen State
+        </button>
+        <button id="btn-hud-watchers" class="btn-hud-watchers" onclick="openWatchPartyModal()" title="Radar search for streamers watching or reacting to this channel">
+          📡 Watch-Party Radar
         </button>
       </div>
 
@@ -1319,6 +1974,99 @@
     </div>
   </div>
 
+  <!-- Watch-Party & Co-Stream Radar Modal -->
+  <div id="watch-party-modal">
+    <div class="radar-modal-content">
+      <!-- Header -->
+      <div class="radar-modal-header">
+        <div class="radar-header-left">
+          <div class="radar-live-badge">
+            <span class="radar-ping-dot"></span>
+            <span class="radar-badge-text">AUTONOMOUS RADAR</span>
+          </div>
+          <div class="radar-modal-title">
+            <span>📡</span>
+            <span>Watch-Party & Co-Stream Radar</span>
+          </div>
+          <div class="radar-subtitle">
+            Autonomous agent scans Twitch for streamers broadcasting themselves watching or reacting to your channel.
+          </div>
+        </div>
+        <button class="close-btn" onclick="closeWatchPartyModal()" title="Close Radar">✕</button>
+      </div>
+
+      <!-- Search Bar & Controls -->
+      <div class="radar-controls-bar">
+        <div class="radar-input-group">
+          <span class="radar-input-prefix">#</span>
+          <input id="radar-channel-input" type="text" placeholder="target channel (e.g. marlon, zarbex)" onkeydown="if(event.key==='Enter') runWatchPartyDiscovery(false);" />
+        </div>
+        <div class="radar-action-buttons">
+          <button id="btn-radar-scan" class="btn-radar-primary" onclick="runWatchPartyDiscovery(false)">
+            <span id="radar-scan-icon">🔍</span>
+            <span id="radar-scan-text">Scan Live Twitch</span>
+          </button>
+          <button id="btn-radar-sim" class="btn-radar-sim" onclick="runWatchPartyDiscovery(true)" title="Run instant agent demonstration preview with simulated co-streamers">
+            <span>🧪</span>
+            <span>Demo Preview</span>
+          </button>
+          <button id="btn-radar-autohook" class="btn-radar-autohook" onclick="autoHookRecommendedStreams()" title="Hook in all candidate streams recommended by the agent">
+            <span>⚡</span>
+            <span id="autohook-btn-text">Auto-Hook Recommended</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Scanning Stage (Shown while searching & evaluating) -->
+      <div id="radar-scanning-stage" class="radar-scanning-stage" style="display: none;">
+        <div class="radar-scope-container">
+          <div class="radar-scope">
+            <div class="radar-sweep"></div>
+            <div class="radar-blip blip-1"></div>
+            <div class="radar-blip blip-2"></div>
+            <div class="radar-blip blip-3"></div>
+            <div class="radar-crosshair-h"></div>
+            <div class="radar-crosshair-v"></div>
+          </div>
+          <div class="radar-scan-status">
+            <div id="radar-scan-headline" class="radar-scan-headline">Scanning Twitch Live Streams...</div>
+            <div id="radar-scan-step" class="radar-scan-step">Querying Twitch GQL for "watching &lt;channel&gt;"...</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Stats Summary Row (Shown when results are ready) -->
+      <div id="radar-stats-bar" class="radar-stats-bar" style="display: none;">
+        <div class="radar-stat-item">
+          <span class="radar-stat-label">Target Channel</span>
+          <span id="radar-stat-channel" class="radar-stat-val" style="color: #38bdf8;">--</span>
+        </div>
+        <div class="radar-stat-item">
+          <span class="radar-stat-label">Total Scanned</span>
+          <span id="radar-stat-scanned" class="radar-stat-val">0</span>
+        </div>
+        <div class="radar-stat-item">
+          <span class="radar-stat-label">Recommend Hook-In</span>
+          <span id="radar-stat-recommended" class="radar-stat-val" style="color: #34d399;">0</span>
+        </div>
+        <div class="radar-stat-item">
+          <span class="radar-stat-label">Potential Co-Streams</span>
+          <span id="radar-stat-potential" class="radar-stat-val" style="color: #fbbf24;">0</span>
+        </div>
+        <div class="radar-stat-item">
+          <span class="radar-stat-label">Scan Duration</span>
+          <span id="radar-stat-time" class="radar-stat-val" style="color: #94a3b8;">0.0s</span>
+        </div>
+      </div>
+
+      <!-- Results Container -->
+      <div id="radar-results-container" class="radar-results-container">
+        <!-- Candidate Cards will be rendered dynamically here -->
+      </div>
+    </div>
+  </div>
+
+
   <script>
     let activeTab = null;
     let activeSessions = {};
@@ -1333,6 +2081,8 @@
     let isTheaterMode = false;
     let activeHls = null;
     let currentStreamSource = "direct";
+    let lastDiscoveredCandidates = [];
+    let isRadarScanning = false;
 
     // In-memory cache for fast UI updates
     window.activeJobs = {};
@@ -2084,6 +2834,16 @@
           activeTab = remaining.length > 0 ? remaining[0] : null;
         }
         renderTabs();
+
+        const hookBtn = document.getElementById(`btn-hook-${channel}`);
+        if (hookBtn) {
+          hookBtn.innerText = "+ Hook In Stream";
+          hookBtn.classList.remove("is-hooked");
+          hookBtn.disabled = false;
+        }
+        for (const c of lastDiscoveredCandidates) {
+          if (c.login === channel) c.is_active_session = false;
+        }
       } catch (err) {
         console.error("Error closing session:", err);
       }
@@ -2485,6 +3245,305 @@
       player.pause();
       player.src = "";
       modal.classList.remove("active");
+    }
+
+    // ==========================================
+    // Watch-Party & Co-Stream Radar Controllers
+    // ==========================================
+
+    function openWatchPartyModal(targetChannel) {
+      const modal = document.getElementById("watch-party-modal");
+      const input = document.getElementById("radar-channel-input");
+      const defaultChan = sanitizeChannelName(targetChannel || activeTab || (Object.keys(activeSessions)[0] || "marlon"));
+      if (input) input.value = defaultChan;
+      if (modal) modal.classList.add("active");
+      runWatchPartyDiscovery(false);
+    }
+
+    function closeWatchPartyModal() {
+      const modal = document.getElementById("watch-party-modal");
+      if (modal) modal.classList.remove("active");
+    }
+
+    function highlightTerms(text, targetChannel, matchedKeywords) {
+      if (!text) return "";
+      let escaped = escapeHtml(text);
+      if (targetChannel) {
+        const regexChan = new RegExp(`(${targetChannel})`, "gi");
+        escaped = escaped.replace(regexChan, '<mark class="chan-match">$1</mark>');
+      }
+      if (matchedKeywords && Array.isArray(matchedKeywords)) {
+        for (const kw of matchedKeywords) {
+          if (!kw) continue;
+          const regexKw = new RegExp(`\\b(${kw})\\b`, "gi");
+          escaped = escaped.replace(regexKw, '<mark class="kw-match">$1</mark>');
+        }
+      }
+      return escaped;
+    }
+
+    async function runWatchPartyDiscovery(forceSim = false) {
+      if (isRadarScanning) return;
+      const input = document.getElementById("radar-channel-input");
+      const channel = sanitizeChannelName(input ? input.value : activeTab) || "marlon";
+      if (input) input.value = channel;
+
+      const scanningStage = document.getElementById("radar-scanning-stage");
+      const statsBar = document.getElementById("radar-stats-bar");
+      const resultsContainer = document.getElementById("radar-results-container");
+      const scanHeadline = document.getElementById("radar-scan-headline");
+      const scanStep = document.getElementById("radar-scan-step");
+      const btnScan = document.getElementById("btn-radar-scan");
+      const btnSim = document.getElementById("btn-radar-sim");
+      const btnAuto = document.getElementById("btn-radar-autohook");
+
+      isRadarScanning = true;
+      if (btnScan) btnScan.disabled = true;
+      if (btnSim) btnSim.disabled = true;
+      if (btnAuto) btnAuto.disabled = true;
+
+      if (scanningStage) scanningStage.style.display = "flex";
+      if (statsBar) statsBar.style.display = "none";
+      if (resultsContainer) resultsContainer.innerHTML = "";
+
+      if (scanHeadline) scanHeadline.innerText = `Scanning Twitch for Streamers Watching #${channel.toUpperCase()}...`;
+      if (scanStep) scanStep.innerText = `Querying Twitch GQL for "watching ${channel}", "${channel} react"...`;
+
+      const tickerSteps = [
+        `Querying Twitch GQL for "watching ${channel}", "${channel} react"...`,
+        `Filtering live video streams & extracting broadcast metadata...`,
+        `Agent Heuristics: Analyzing titles, category relevance & streamer audience...`,
+        `Synthesizing autonomous agent determinations & confidence scores...`
+      ];
+      let stepIdx = 0;
+      const tickerInterval = setInterval(() => {
+        stepIdx = (stepIdx + 1) % tickerSteps.length;
+        if (scanStep) scanStep.innerText = tickerSteps[stepIdx];
+      }, 900);
+
+      try {
+        const url = `/api/sessions/${encodeURIComponent(channel)}/discover-watchers?simulate=${forceSim ? "true" : "false"}&include_simulation=true`;
+        const res = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ channel, force_simulation: forceSim, include_simulation: true })
+        });
+        const data = await res.json();
+        clearInterval(tickerInterval);
+
+        if (scanningStage) scanningStage.style.display = "none";
+
+        if (res.ok && data) {
+          lastDiscoveredCandidates = data.candidates || [];
+          renderWatchPartyResults(data);
+        } else {
+          if (resultsContainer) {
+            resultsContainer.innerHTML = `
+              <div class="radar-empty-state">
+                <div style="font-size: 36px;">⚠️</div>
+                <div class="radar-empty-title">Discovery Failed</div>
+                <div class="radar-empty-desc">${escapeHtml(data.error || "Unable to scan Twitch live streams.")}</div>
+              </div>
+            `;
+          }
+        }
+      } catch (err) {
+        clearInterval(tickerInterval);
+        if (scanningStage) scanningStage.style.display = "none";
+        if (resultsContainer) {
+          resultsContainer.innerHTML = `
+            <div class="radar-empty-state">
+              <div style="font-size: 36px;">⚠️</div>
+              <div class="radar-empty-title">Network Request Error</div>
+              <div class="radar-empty-desc">${escapeHtml(err.message)}</div>
+            </div>
+          `;
+        }
+      } finally {
+        isRadarScanning = false;
+        if (btnScan) btnScan.disabled = false;
+        if (btnSim) btnSim.disabled = false;
+        if (btnAuto) btnAuto.disabled = false;
+      }
+    }
+
+    function renderWatchPartyResults(data) {
+      const statsBar = document.getElementById("radar-stats-bar");
+      const resultsContainer = document.getElementById("radar-results-container");
+      const btnAuto = document.getElementById("btn-radar-autohook");
+      const autoText = document.getElementById("autohook-btn-text");
+
+      if (statsBar) {
+        statsBar.style.display = "flex";
+        document.getElementById("radar-stat-channel").innerText = `#${(data.target_channel || "").toUpperCase()}`;
+        document.getElementById("radar-stat-scanned").innerText = data.total_scanned || data.candidates_count || 0;
+        document.getElementById("radar-stat-recommended").innerText = data.hook_recommendations || 0;
+        document.getElementById("radar-stat-potential").innerText = data.potential_count || 0;
+        document.getElementById("radar-stat-time").innerText = `${data.elapsed_seconds || 0}s`;
+      }
+
+      const cands = data.candidates || [];
+      const unhookedRecs = cands.filter(c => c.decision === "HOOK_IN" && !activeSessions[c.login]);
+      if (btnAuto) {
+        btnAuto.disabled = unhookedRecs.length === 0;
+      }
+      if (autoText) {
+        autoText.innerText = unhookedRecs.length > 0 ? `Auto-Hook Recommended (${unhookedRecs.length})` : "Auto-Hook Recommended";
+      }
+
+      if (cands.length === 0) {
+        resultsContainer.innerHTML = `
+          <div class="radar-empty-state">
+            <div style="font-size: 40px;">📡</div>
+            <div class="radar-empty-title">No Co-Streamers Detected</div>
+            <div class="radar-empty-desc">
+              No live streamers currently watching or reacting to <b>#${data.target_channel}</b> were found on Twitch at this moment.
+            </div>
+            <button class="btn-radar-sim" style="margin-top: 8px;" onclick="runWatchPartyDiscovery(true)">
+              🧪 Run Demo Simulation Preview
+            </button>
+          </div>
+        `;
+        return;
+      }
+
+      resultsContainer.innerHTML = cands.map(cand => {
+        const isHooked = Boolean(activeSessions[cand.login] || cand.is_active_session);
+        const confPct = Math.round((cand.confidence || 0.1) * 100);
+        const cardClass = (cand.decision || "").toLowerCase().replace("_", "-");
+
+        let badgeHtml = "";
+        let barColor = "#64748b";
+        if (cand.decision === "HOOK_IN") {
+          badgeHtml = `<span class="det-badge hook">🟢 RECOMMEND HOOK IN</span>`;
+          barColor = "#10b981";
+        } else if (cand.decision === "POTENTIAL") {
+          badgeHtml = `<span class="det-badge potential">🟡 POTENTIAL CO-STREAM</span>`;
+          barColor = "#f59e0b";
+        } else {
+          badgeHtml = `<span class="det-badge dismiss">⚪ DISMISSED</span>`;
+          barColor = "#64748b";
+        }
+
+        const previewImg = cand.preview_image_url
+          ? `<img class="cand-thumb" src="${cand.preview_image_url}" alt="Preview" onerror="this.onerror=null;this.parentElement.innerHTML='<div class=\\'cand-thumb-fallback\\'>📺</div>';" />`
+          : `<div class="cand-thumb-fallback">📺</div>`;
+
+        const simBadge = cand.is_simulation ? `<span class="cand-sim-badge">SIMULATION</span>` : "";
+
+        const highlightedTitle = highlightTerms(cand.title, data.target_channel, cand.matched_keywords);
+
+        return `
+          <div class="cand-card ${cardClass}" id="cand-card-${cand.login}">
+            <div class="cand-left">
+              <div class="cand-thumb-box">
+                ${previewImg}
+                ${simBadge}
+                <div class="cand-viewers-pill">👥 ${(cand.viewers || 0).toLocaleString()}</div>
+              </div>
+              <div class="cand-streamer-row">
+                ${cand.profile_image_url ? `<img class="cand-avatar" src="${cand.profile_image_url}" alt="${cand.display_name}" />` : ""}
+                <div class="cand-streamer-names">
+                  <div class="cand-display-name">${escapeHtml(cand.display_name)}</div>
+                  <div class="cand-login-handle">@${escapeHtml(cand.login)}</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="cand-center">
+              <div class="cand-meta-line">
+                <span class="cand-game-tag">🎮 ${escapeHtml(cand.game || "Live Stream")}</span>
+              </div>
+              <div class="cand-title">${highlightedTitle}</div>
+              <div class="cand-agent-box ${cardClass}">
+                <div class="cand-agent-top">
+                  ${badgeHtml}
+                  <div class="cand-conf-box">
+                    <span>Score:</span>
+                    <div class="cand-conf-bar-track">
+                      <div class="cand-conf-bar-fill" style="width: ${confPct}%; background: ${barColor};"></div>
+                    </div>
+                    <span>${confPct}%</span>
+                  </div>
+                </div>
+                <div class="cand-reasoning">${escapeHtml(cand.reasoning || "")}</div>
+              </div>
+            </div>
+
+            <div class="cand-right">
+              <button id="btn-hook-${cand.login}" class="btn-hook-stream ${isHooked ? 'is-hooked' : ''}" ${isHooked ? 'disabled' : ''} onclick="hookInDiscoveredStream('${cand.login}')">
+                ${isHooked ? '✓ Hooked In' : '+ Hook In Stream'}
+              </button>
+              <a href="https://twitch.tv/${encodeURIComponent(cand.login)}" target="_blank" rel="noopener noreferrer" class="btn-cand-twitch">
+                Twitch ↗
+              </a>
+            </div>
+          </div>
+        `;
+      }).join("");
+    }
+
+    async function hookInDiscoveredStream(channel) {
+      channel = sanitizeChannelName(channel);
+      if (!channel) return;
+      if (activeSessions[channel]) {
+        selectTab(channel);
+        return;
+      }
+      const hookBtn = document.getElementById(`btn-hook-${channel}`);
+      if (hookBtn) {
+        hookBtn.innerText = "Hooking in...";
+        hookBtn.disabled = true;
+      }
+      try {
+        const res = await fetch("/api/sessions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ channel })
+        });
+        const data = await res.json();
+        if (res.ok) {
+          activeSessions[channel] = { channel, status: "monitoring" };
+          renderTabs();
+          if (hookBtn) {
+            hookBtn.innerText = "✓ Hooked In";
+            hookBtn.classList.add("is-hooked");
+            hookBtn.disabled = true;
+          }
+          for (const c of lastDiscoveredCandidates) {
+            if (c.login === channel) c.is_active_session = true;
+          }
+          const unhookedRecs = lastDiscoveredCandidates.filter(c => c.decision === "HOOK_IN" && !activeSessions[c.login]);
+          const btnAuto = document.getElementById("btn-radar-autohook");
+          const autoText = document.getElementById("autohook-btn-text");
+          if (btnAuto) btnAuto.disabled = unhookedRecs.length === 0;
+          if (autoText) autoText.innerText = unhookedRecs.length > 0 ? `Auto-Hook Recommended (${unhookedRecs.length})` : "Auto-Hook Recommended";
+        } else {
+          alert("Error hooking in stream: " + (data.error || "Failed to add stream"));
+          if (hookBtn) {
+            hookBtn.innerText = "+ Hook In Stream";
+            hookBtn.disabled = false;
+          }
+        }
+      } catch (err) {
+        alert("Network error hooking in stream: " + err);
+        if (hookBtn) {
+          hookBtn.innerText = "+ Hook In Stream";
+          hookBtn.disabled = false;
+        }
+      }
+    }
+
+    async function autoHookRecommendedStreams() {
+      if (!lastDiscoveredCandidates || lastDiscoveredCandidates.length === 0) return;
+      const toHook = lastDiscoveredCandidates.filter(c => c.decision === "HOOK_IN" && !activeSessions[c.login]);
+      if (toHook.length === 0) {
+        alert("All recommended co-streams are already hooked in!");
+        return;
+      }
+      for (const cand of toHook) {
+        await hookInDiscoveredStream(cand.login);
+      }
     }
 
     fetch("/api/sessions")

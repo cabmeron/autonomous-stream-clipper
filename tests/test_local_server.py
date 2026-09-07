@@ -171,3 +171,74 @@ def test_clean_channel_name_normalization():
     assert clean_channel_name("  https://twitch.tv/tarik/?ref=test  ") == "tarik"
     assert clean_channel_name("") == ""
 
+
+@pytest.mark.asyncio
+async def test_watch_party_discovery_endpoints():
+    from aiohttp import web
+    from aiohttp.test_utils import TestClient, TestServer
+    from orchestrator import StreamClipperOrchestrator, StreamSession
+
+    orch = StreamClipperOrchestrator()
+    orch.sessions["tarik_marlon_reacts"] = StreamSession(channel="tarik_marlon_reacts", orchestrator=orch)
+
+    app = web.Application()
+
+    async def post_discover_watchers_handler(request):
+        channel = request.match_info.get("channel") or request.query.get("channel")
+        force_simulation = request.query.get("simulate", "false").lower() in ("true", "1")
+        include_simulation = request.query.get("include_simulation", "true").lower() in ("true", "1")
+        if not channel and request.can_read_body:
+            try:
+                body = await request.json()
+                channel = body.get("channel")
+                if "force_simulation" in body:
+                    force_simulation = bool(body.get("force_simulation"))
+            except Exception:
+                pass
+        clean = channel or "marlon"
+        res = await orch.watch_party_finder.discover_and_evaluate(
+            target_channel=clean,
+            include_simulation_if_empty=include_simulation,
+            force_simulation=force_simulation,
+        )
+        for cand in res.get("candidates", []):
+            cand["is_active_session"] = cand.get("login") in orch.sessions
+        return web.json_response(res)
+
+    async def get_watchers_handler(request):
+        channel = request.match_info.get("channel") or "marlon"
+        cached = orch.watch_party_finder.get_cached_results(channel)
+        if not cached:
+            cached = await orch.watch_party_finder.discover_and_evaluate(channel, force_simulation=True)
+        for cand in cached.get("candidates", []):
+            cand["is_active_session"] = cand.get("login") in orch.sessions
+        return web.json_response(cached)
+
+    app.router.add_post("/api/sessions/{channel}/discover-watchers", post_discover_watchers_handler)
+    app.router.add_post("/api/discover-watchers", post_discover_watchers_handler)
+    app.router.add_get("/api/sessions/{channel}/watchers", get_watchers_handler)
+
+    client = TestClient(TestServer(app))
+    await client.start_server()
+
+    # Test POST with simulate=true query param
+    resp = await client.post("/api/sessions/marlon/discover-watchers?simulate=true")
+    assert resp.status == 200
+    data = await resp.json()
+    assert data["target_channel"] == "marlon"
+    assert data["candidates_count"] > 0
+    assert data["hook_recommendations"] >= 1
+    # Check that is_active_session correctly identified active session
+    active_cand = next((c for c in data["candidates"] if c["login"] == "tarik_marlon_reacts"), None)
+    assert active_cand is not None
+    assert active_cand["is_active_session"] is True
+
+    # Test GET cached results
+    get_resp = await client.get("/api/sessions/marlon/watchers")
+    assert get_resp.status == 200
+    get_data = await get_resp.json()
+    assert get_data["target_channel"] == "marlon"
+
+    await client.close()
+
+

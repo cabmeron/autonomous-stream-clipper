@@ -18,6 +18,7 @@ from services.heuristics.ocr_engine import BoundedRegionOCR
 from services.heuristics.gate_evaluator import GateEvaluator
 from services.heuristics.chat_descriptor import LocalChatDescriptorService
 from services.heuristics.screen_summarizer import ScreenStateSummarizerService
+from services.heuristics.watch_party_finder import WatchPartyFinderService
 from services.processor.slicer import SegmentSlicer
 from services.processor.transcriber import AudioTranscriber
 from services.processor.boundary_ai import BoundaryOptimizer
@@ -253,6 +254,9 @@ class StreamClipperOrchestrator:
 
         # Registry of active clipping pipeline jobs: job_id -> job_dict
         self.active_jobs: Dict[str, dict] = {}
+
+        # 3. Watch Party & Co-Stream Discovery Engine
+        self.watch_party_finder = WatchPartyFinderService()
 
         # Hook telemetry providers into telemetry server
         telemetry_server.sessions_telemetry_provider = self.get_all_telemetry
@@ -931,6 +935,59 @@ class StreamClipperOrchestrator:
                 channel = clean_channel_name(channel)
             summaries = await asyncio.to_thread(self.db.get_recent_screen_summaries, channel, limit)
             return web.json_response(summaries)
+
+        async def post_discover_watchers_handler(request):
+            """Discovers Twitch streams watching or reacting to a channel, evaluated by an autonomous agent."""
+            try:
+                channel = request.match_info.get("channel") or request.query.get("channel")
+                force_simulation = request.query.get("simulate", "false").lower() in ("true", "1")
+                include_simulation = request.query.get("include_simulation", "true").lower() in ("true", "1")
+
+                if not channel and request.can_read_body:
+                    try:
+                        body = await request.json()
+                        channel = body.get("channel")
+                        if "force_simulation" in body:
+                            force_simulation = bool(body.get("force_simulation"))
+                        if "include_simulation" in body:
+                            include_simulation = bool(body.get("include_simulation"))
+                    except Exception:
+                        pass
+
+                clean = clean_channel_name(channel) if channel else None
+                if not clean:
+                    clean = list(self.sessions.keys())[0] if self.sessions else "marlon"
+
+                res = await self.watch_party_finder.discover_and_evaluate(
+                    target_channel=clean,
+                    include_simulation_if_empty=include_simulation,
+                    force_simulation=force_simulation,
+                )
+                # Annotate each candidate with whether it is already actively hooked into Clipper
+                for cand in res.get("candidates", []):
+                    c_login = cand.get("login")
+                    cand["is_active_session"] = c_login in self.sessions
+
+                return web.json_response(res)
+            except Exception as e:
+                logger.error("[LocalServer] Error in watch party discovery: %s", e, exc_info=True)
+                return web.json_response({"error": str(e)}, status=500)
+
+        async def get_watchers_handler(request):
+            channel = clean_channel_name(request.match_info.get("channel") or request.query.get("channel") or "")
+            if not channel:
+                channel = list(self.sessions.keys())[0] if self.sessions else "marlon"
+            cached = self.watch_party_finder.get_cached_results(channel)
+            if not cached:
+                cached = await self.watch_party_finder.discover_and_evaluate(channel)
+            for cand in cached.get("candidates", []):
+                cand["is_active_session"] = cand.get("login") in self.sessions
+            return web.json_response(cached)
+
+        app.router.add_post("/api/sessions/{channel}/discover-watchers", post_discover_watchers_handler)
+        app.router.add_post("/api/discover-watchers", post_discover_watchers_handler)
+        app.router.add_get("/api/sessions/{channel}/watchers", get_watchers_handler)
+        app.router.add_get("/api/watchers", get_watchers_handler)
 
         app.router.add_post("/api/sessions/{channel}/summarize-screen", post_summarize_screen_handler)
         app.router.add_post("/api/summarize-screen", post_summarize_screen_handler)
