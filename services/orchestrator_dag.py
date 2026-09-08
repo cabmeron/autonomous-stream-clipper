@@ -320,6 +320,11 @@ class GraphDAGManager:
         node["properties"][param] = value
         if node.get("type") == "StreamSourceNode" and param == "channel":
             node["title"] = f"Twitch Source: #{value}"
+        if node.get("type") == "GamblingOCRNode" and param.startswith("roi_"):
+            rkey = param.replace("roi_", "")
+            if "rois" not in node["properties"] or not isinstance(node["properties"]["rois"], dict):
+                node["properties"]["rois"] = {}
+            node["properties"]["rois"][rkey] = value
 
         # Hot-reload into orchestrator
         self._apply_graph_to_orchestrator()
@@ -389,6 +394,44 @@ class GraphDAGManager:
                 trigs_list = [l.strip() for l in raw_trigs.split(",") if l.strip()] if isinstance(raw_trigs, str) else raw_trigs
                 session.cv_service.set_trigger_labels(trigs_list)
 
+        # 3c. Update Facecam Emotion settings
+        face_node = next((n for n in self.nodes.values() if n["type"] == "FacecamEmotionNode"), None)
+        if face_node and getattr(session, "streamer_emotion", None):
+            props = face_node.get("properties", {})
+            if "tilt_threshold" in props:
+                session.streamer_emotion.tilt_threshold = float(props["tilt_threshold"])
+            if "euphoria_threshold" in props:
+                session.streamer_emotion.euphoria_threshold = float(props["euphoria_threshold"])
+            if "face_roi" in props and isinstance(props["face_roi"], dict):
+                r = props["face_roi"]
+                session.streamer_emotion.update_roi(r.get("x", 0.02), r.get("y", 0.05), r.get("w", 0.22), r.get("h", 0.28))
+
+        # 3d. Update Gambling OCR settings
+        g_ocr_node = next((n for n in self.nodes.values() if n["type"] == "GamblingOCRNode"), None)
+        if g_ocr_node and getattr(session, "gambling_ocr", None):
+            props = g_ocr_node.get("properties", {})
+            if "preset" in props:
+                session.gambling_ocr.set_preset(props["preset"])
+            if "rois" in props and isinstance(props["rois"], dict):
+                for rkey, rval in props["rois"].items():
+                    if isinstance(rval, dict):
+                        session.gambling_ocr.update_roi(rkey, rval.get("x", 0), rval.get("y", 0), rval.get("w", 0.1), rval.get("h", 0.1))
+            for rk in ("balance", "bet", "win", "reels"):
+                if f"roi_{rk}" in props and isinstance(props[f"roi_{rk}"], dict):
+                    rv = props[f"roi_{rk}"]
+                    session.gambling_ocr.update_roi(rk, rv.get("x", 0), rv.get("y", 0), rv.get("w", 0.1), rv.get("h", 0.1))
+
+        # 3e. Update Gambling Ledger settings
+        ledger_node = next((n for n in self.nodes.values() if n["type"] == "GamblingLedgerNode"), None)
+        if ledger_node and getattr(session, "gambling_ledger", None):
+            props = ledger_node.get("properties", {})
+            if "starting_balance" in props and props["starting_balance"] is not None:
+                session.gambling_ledger.set_starting_balance(float(props["starting_balance"]))
+            if "big_win_multiplier" in props:
+                session.gambling_ledger.big_win_multiplier = float(props["big_win_multiplier"])
+            if "big_win_dollars" in props:
+                session.gambling_ledger.big_win_dollars = float(props["big_win_dollars"])
+
         # 4. Update Gate Evaluator settings
         gate_node = next((n for n in self.nodes.values() if n["type"] == "GateEvaluatorNode"), None)
         if gate_node and session.gate_evaluator:
@@ -448,6 +491,8 @@ class GraphDAGManager:
                     "multiplier": extra.get("ocr_multiplier", "1.0x"),
                     "balance": extra.get("ocr_balance", "$0.00"),
                     "pnl_delta": extra.get("ocr_pnl_delta", 0.0),
+                    "roi": getattr(session.ocr_engine, "roi", None),
+                    "stream_frame_b64": extra.get("stream_frame_b64", ""),
                 }
             elif n["type"] == "CVTransformerNode":
                 payload[n["id"]] = {
@@ -457,7 +502,48 @@ class GraphDAGManager:
                     "detections": extra.get("cv_boxes", []),
                     "latency_ms": extra.get("cv_latency_ms", 0.0),
                     "thumbnail_b64": extra.get("cv_thumbnail_b64", ""),
+                    "stream_frame_b64": extra.get("stream_frame_b64", ""),
                     "engine": getattr(session.cv_service.engine, "engine_name", "coreml") if getattr(session, "cv_service", None) else "coreml",
+                }
+            elif n["type"] == "FacecamEmotionNode":
+                payload[n["id"]] = {
+                    "top_emotion": extra.get("emotion_top", "neutral"),
+                    "confidence": extra.get("emotion_confidence", 0.0),
+                    "emotions": extra.get("emotion_distribution", {}),
+                    "valence": extra.get("emotion_valence", 0.0),
+                    "arousal": extra.get("emotion_arousal", 0.0),
+                    "tilt_score": extra.get("emotion_tilt", 0.0),
+                    "euphoria_score": extra.get("emotion_euphoria", 0.0),
+                    "is_tilting": extra.get("is_tilting", False),
+                    "face_roi": getattr(session.streamer_emotion, "face_roi", {}) if getattr(session, "streamer_emotion", None) else {},
+                    "stream_frame_b64": extra.get("stream_frame_b64", ""),
+                }
+            elif n["type"] == "GamblingOCRNode":
+                payload[n["id"]] = {
+                    "balance": extra.get("gambling_balance", 0.0),
+                    "bet": extra.get("gambling_bet", 0.0),
+                    "win": extra.get("gambling_win", 0.0),
+                    "multiplier": extra.get("gambling_multiplier", 0.0),
+                    "spin_state": extra.get("gambling_spin_state", "IDLE"),
+                    "rois": getattr(session.gambling_ocr, "rois", {}) if getattr(session, "gambling_ocr", None) else {},
+                    "stream_frame_b64": extra.get("stream_frame_b64", ""),
+                }
+            elif n["type"] == "GamblingLedgerNode":
+                ledger_summary = session.gambling_ledger.get_summary() if getattr(session, "gambling_ledger", None) else {}
+                payload[n["id"]] = {
+                    "starting_balance": ledger_summary.get("starting_balance", 0.0),
+                    "current_balance": ledger_summary.get("current_balance", 0.0),
+                    "net_pnl": ledger_summary.get("net_pnl", 0.0),
+                    "winrate_pct": ledger_summary.get("winrate_pct", 0.0),
+                    "current_streak": ledger_summary.get("current_streak", 0),
+                    "total_spins": ledger_summary.get("total_spins", 0),
+                    "total_wagered": ledger_summary.get("total_wagered", 0.0),
+                    "total_payout": ledger_summary.get("total_payout", 0.0),
+                    "experienced_rtp": ledger_summary.get("experienced_rtp", 100.0),
+                    "is_chasing_losses": ledger_summary.get("is_chasing_losses", False),
+                    "drawdown_dollars": ledger_summary.get("drawdown_dollars", 0.0),
+                    "drawdown_pct": ledger_summary.get("drawdown_pct", 0.0),
+                    "pnl_history": ledger_summary.get("pnl_history", [])[-20:],
                 }
             elif n["type"] == "GateEvaluatorNode":
                 debounce_sec = getattr(session.gate_evaluator, "debounce_seconds", 30.0) if session.gate_evaluator else 30.0

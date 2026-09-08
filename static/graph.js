@@ -33,6 +33,7 @@
       this.draggedNode = null;
       this.nodeDragOffset = { x: 0, y: 0 };
       this.activeWireDrag = null; // { fromNodeId, fromPortId, fromType, startX, startY, currentX, currentY }
+      this.nodeRoiControllers = new Map();
 
       // Preset Templates
       this.nodeCatalog = [
@@ -41,6 +42,9 @@
         { type: "ChatVelocityNode", category: "chat", title: "Chat Velocity Engine", icon: "💬", desc: "Messages/sec & spike ratio" },
         { type: "OCRVisionNode", category: "ocr", title: "OCR / Vision Engine", icon: "🔍", desc: "Multiplier & slot balance detection" },
         { type: "CVTransformerNode", category: "cv", title: "HuggingFace Vision", icon: "👁️", desc: "Zero-shot classification & detection" },
+        { type: "FacecamEmotionNode", category: "cv", title: "Facecam Emotion & Tilt", icon: "😡", desc: "Tilt Index, Valence, Arousal & Spikes" },
+        { type: "GamblingOCRNode", category: "ocr", title: "Gambling Multi-OCR", icon: "🎰", desc: "Balance, Bet, Win & Reel motion HUD" },
+        { type: "GamblingLedgerNode", category: "analytics", title: "Gambling PnL & Ledger", icon: "💰", desc: "Net PnL, Winrate, Streaks & Martingale alert" },
         { type: "ScreenSummarizerNode", category: "summarizer", title: "AI Screen Summarizer", icon: "🤖", desc: "Multimodal frame vision + chat" },
         { type: "GateEvaluatorNode", category: "gate", title: "Gate Evaluator & Logic", icon: "⚡", desc: "Weighted scoring & debounce" },
         { type: "SegmentSlicerNode", category: "slicer", title: "Rolling Segment Slicer", icon: "✂️", desc: "60s zero-copy extraction" },
@@ -554,6 +558,124 @@
     }
 
     /* -------------------------------------------------------------
+       Interactive Draggable & Resizable ROI Bounding Box Engine
+       ------------------------------------------------------------- */
+    setupDraggableRoiBox(containerEl, initialRoi, color, label, onChange) {
+      const box = document.createElement("div");
+      box.className = "roi-draggable-box";
+      box.style.borderColor = color;
+      box.style.backgroundColor = color.startsWith("#") ? `${color}22` : "rgba(56, 189, 248, 0.15)";
+      box.style.color = color;
+
+      let currentRoi = {
+        x: initialRoi?.x ?? 0.1,
+        y: initialRoi?.y ?? 0.1,
+        w: initialRoi?.w ?? 0.2,
+        h: initialRoi?.h ?? 0.2,
+      };
+
+      const badge = document.createElement("div");
+      badge.className = "roi-label-badge";
+      badge.style.background = color;
+      box.appendChild(badge);
+
+      const handle = document.createElement("div");
+      handle.className = "roi-resize-handle";
+      handle.style.background = color;
+      box.appendChild(handle);
+
+      const updateDomStyle = () => {
+        box.style.left = `${(currentRoi.x * 100).toFixed(1)}%`;
+        box.style.top = `${(currentRoi.y * 100).toFixed(1)}%`;
+        box.style.width = `${(currentRoi.w * 100).toFixed(1)}%`;
+        box.style.height = `${(currentRoi.h * 100).toFixed(1)}%`;
+        badge.textContent = `${label} (${Math.round(currentRoi.x * 100)}%, ${Math.round(currentRoi.y * 100)}% - ${Math.round(currentRoi.w * 100)}x${Math.round(currentRoi.h * 100)}%)`;
+      };
+
+      updateDomStyle();
+      containerEl.appendChild(box);
+
+      // Dragging entire box
+      box.addEventListener("mousedown", (e) => {
+        if (e.target === handle) return;
+        e.stopPropagation();
+        e.preventDefault();
+
+        box.classList.add("active");
+        const cRect = containerEl.getBoundingClientRect();
+        const startMouseX = e.clientX;
+        const startMouseY = e.clientY;
+        const startX = currentRoi.x;
+        const startY = currentRoi.y;
+
+        const onMouseMove = (ev) => {
+          const dx = (ev.clientX - startMouseX) / (cRect.width || 1);
+          const dy = (ev.clientY - startMouseY) / (cRect.height || 1);
+          currentRoi.x = Math.max(0, Math.min(1 - currentRoi.w, startX + dx));
+          currentRoi.y = Math.max(0, Math.min(1 - currentRoi.h, startY + dy));
+          updateDomStyle();
+          if (typeof onChange === "function") onChange({ ...currentRoi }, false);
+        };
+
+        const onMouseUp = () => {
+          box.classList.remove("active");
+          window.removeEventListener("mousemove", onMouseMove);
+          window.removeEventListener("mouseup", onMouseUp);
+          if (typeof onChange === "function") onChange({ ...currentRoi }, true);
+        };
+
+        window.addEventListener("mousemove", onMouseMove);
+        window.addEventListener("mouseup", onMouseUp);
+      });
+
+      // Resizing handle
+      handle.addEventListener("mousedown", (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+
+        box.classList.add("active");
+        const cRect = containerEl.getBoundingClientRect();
+        const startMouseX = e.clientX;
+        const startMouseY = e.clientY;
+        const startW = currentRoi.w;
+        const startH = currentRoi.h;
+
+        const onResizeMove = (ev) => {
+          const dw = (ev.clientX - startMouseX) / (cRect.width || 1);
+          const dh = (ev.clientY - startMouseY) / (cRect.height || 1);
+          currentRoi.w = Math.max(0.04, Math.min(1 - currentRoi.x, startW + dw));
+          currentRoi.h = Math.max(0.04, Math.min(1 - currentRoi.y, startH + dh));
+          updateDomStyle();
+          if (typeof onChange === "function") onChange({ ...currentRoi }, false);
+        };
+
+        const onResizeUp = () => {
+          box.classList.remove("active");
+          window.removeEventListener("mousemove", onResizeMove);
+          window.removeEventListener("mouseup", onResizeUp);
+          if (typeof onChange === "function") onChange({ ...currentRoi }, true);
+        };
+
+        window.addEventListener("mousemove", onResizeMove);
+        window.addEventListener("mouseup", onResizeUp);
+      });
+
+      return {
+        box,
+        update: (newRoi) => {
+          currentRoi = { ...newRoi };
+          updateDomStyle();
+        },
+        getRoi: () => ({ ...currentRoi }),
+        setVisible: (v) => { box.style.display = v ? "block" : "none"; },
+        setActive: (v) => {
+          if (v) box.classList.add("active");
+          else box.classList.remove("active");
+        },
+      };
+    }
+
+    /* -------------------------------------------------------------
        In-Node Interactive Widgets
        ------------------------------------------------------------- */
     attachNodeWidgets(node, bodyEl) {
@@ -582,6 +704,7 @@
             <video id="mini-player-${node.id}" autoplay muted playsinline></video>
             <div class="preview-badge" id="preview-badge-${node.id}">🟢 Live HLS</div>
           </div>
+          <button class="roi-tab-btn" style="margin-top: 8px; width: 100%; text-align: center; background: rgba(56, 189, 248, 0.15); border-color: #38bdf8; color: #38bdf8; padding: 5px;" id="btn-open-calibrator-${node.id}">🎯 Calibrate ROIs Over Full Stream</button>
         `;
         bodyEl.appendChild(widget);
 
@@ -597,6 +720,11 @@
             }
           });
         }
+
+        // Calibrate button click
+        widget.querySelector(`#btn-open-calibrator-${node.id}`)?.addEventListener("click", () => {
+          this.openStreamCalibrator();
+        });
 
         // Mount HLS stream on mini player
         setTimeout(() => {
@@ -649,13 +777,239 @@
             <span>Interactive ROI Crop Box</span>
             <span class="widget-val" id="ocr-val-${node.id}">1.0x Multiplier</span>
           </div>
-          <div class="node-roi-container">
-            <div style="position:absolute; width:100%; height:100%; display:flex; align-items:center; justify-content:center; color:#475569; font-size:11px;">
-              Live Screen Frame ROI
+          <div class="node-roi-container roi-container-${node.id}">
+            <img class="roi-live-img" id="ocr-live-img-${node.id}" style="display:none;" />
+            <div class="roi-placeholder-text" id="ocr-placeholder-${node.id}">Live Screen Frame (Drag Box to Select Area)</div>
+          </div>
+          <div style="display:flex; justify-content:space-between; font-size:9px; color:#94a3b8; margin-top:4px;">
+            <span>Win Threshold: ≥ ${props.multiplier_threshold || 100}x</span>
+            <span id="ocr-status-${node.id}" style="color:#10b981;">MONITORING</span>
+          </div>
+          <input type="range" class="node-slider" min="10" max="500" step="10" value="${props.multiplier_threshold || 100}" />
+        `;
+        const slider = widget.querySelector(".node-slider");
+        slider.addEventListener("input", (e) => {
+          props.multiplier_threshold = parseFloat(e.target.value);
+          widget.querySelector("span:nth-child(1)").textContent = `Win Threshold: ≥ ${props.multiplier_threshold}x`;
+          this.syncNodeParamDebounced(node.id, "multiplier_threshold", props.multiplier_threshold);
+        });
+        bodyEl.appendChild(widget);
+
+        // Mount interactive draggable ROI box
+        setTimeout(() => {
+          const container = widget.querySelector(`.roi-container-${node.id}`);
+          if (container) {
+            const initialRoi = props.roi || { x: 0.70, y: 0.85, w: 0.28, h: 0.12 };
+            props.roi = initialRoi;
+            const ctrl = this.setupDraggableRoiBox(container, initialRoi, "#10b981", "OCR ROI", (roi, isFinal) => {
+              props.roi = roi;
+              if (isFinal) {
+                this.syncNodeParamDebounced(node.id, "roi", roi);
+                this.showToast("OCR ROI calibrated");
+              }
+            });
+            this.nodeRoiControllers.set(`${node.id}:ocr`, ctrl);
+          }
+        }, 50);
+      } else if (node.type === "FacecamEmotionNode") {
+        const widget = document.createElement("div");
+        widget.setAttribute("class", "node-widget");
+        const tiltThresh = props.tilt_threshold !== undefined ? props.tilt_threshold : 65.0;
+        widget.innerHTML = `
+          <div class="widget-label">
+            <span>Facecam ROI & Emotional Dynamics</span>
+            <span class="widget-val" id="face-top-val-${node.id}">CALM</span>
+          </div>
+          <div class="node-roi-container roi-container-${node.id}">
+            <img class="roi-live-img" id="face-live-img-${node.id}" style="display:none;" />
+            <div class="roi-placeholder-text" id="face-placeholder-${node.id}">Stream Frame (Drag Box Over Facecam)</div>
+          </div>
+          <div class="tilt-card">
+            <div class="tilt-meter-box">
+              <span style="font-size: 9px; color: #94a3b8; font-weight: 700;">TILT INDEX</span>
+              <span class="tilt-num" id="face-tilt-num-${node.id}" style="color: #34d399;">0.0</span>
             </div>
-            <div class="roi-overlay-box" style="left:70%; top:80%; width:28%; height:16%;">
-              <div class="roi-handle"></div>
+            <div style="text-align: right;">
+              <span class="tilt-state-pill" id="face-tilt-pill-${node.id}" style="background: rgba(52, 211, 153, 0.15); color: #34d399;">CALM</span>
+              <div style="font-size: 9px; color: #94a3b8; margin-top: 4px;">Euphoria: <strong id="face-euphoria-val-${node.id}" style="color: #fbbf24;">0%</strong></div>
             </div>
+          </div>
+          <div style="margin-top: 6px;">
+            <div style="display: flex; justify-content: space-between; font-size: 9px; color: #94a3b8;">
+              <span>Valence (Frustrated ⟵ ⟶ Happy)</span>
+              <span id="face-valence-val-${node.id}">0.0</span>
+            </div>
+            <div class="valence-track">
+              <div class="valence-indicator" id="face-valence-ind-${node.id}" style="left: 50%;"></div>
+            </div>
+          </div>
+          <div class="cv-bars-box" id="face-bars-${node.id}">
+            <div class="cv-prob-row"><span class="cv-prob-label">joy</span><div class="cv-prob-track"><div class="cv-prob-fill" style="width: 10%; background: #34d399;"></div></div><span class="cv-prob-pct">10%</span></div>
+            <div class="cv-prob-row"><span class="cv-prob-label">rage</span><div class="cv-prob-track"><div class="cv-prob-fill" style="width: 5%; background: #ef4444;"></div></div><span class="cv-prob-pct">5%</span></div>
+            <div class="cv-prob-row"><span class="cv-prob-label">shock</span><div class="cv-prob-track"><div class="cv-prob-fill" style="width: 5%; background: #f59e0b;"></div></div><span class="cv-prob-pct">5%</span></div>
+            <div class="cv-prob-row"><span class="cv-prob-label">despair</span><div class="cv-prob-track"><div class="cv-prob-fill" style="width: 5%; background: #a855f7;"></div></div><span class="cv-prob-pct">5%</span></div>
+          </div>
+          <div style="display:flex; justify-content:space-between; font-size:9px; color:#94a3b8; margin-top:4px;">
+            <span id="tilt-thresh-label-${node.id}">Tilt Trigger Threshold: ≥ ${tiltThresh}</span>
+            <span id="face-latency-tag-${node.id}" style="color:#06b6d4;">-- ms</span>
+          </div>
+          <input type="range" class="node-slider" min="40" max="95" step="5" value="${tiltThresh}" />
+        `;
+        const slider = widget.querySelector(".node-slider");
+        slider.addEventListener("input", (e) => {
+          props.tilt_threshold = parseFloat(e.target.value);
+          widget.querySelector(`#tilt-thresh-label-${node.id}`).textContent = `Tilt Trigger Threshold: ≥ ${props.tilt_threshold}`;
+          this.syncNodeParamDebounced(node.id, "tilt_threshold", props.tilt_threshold);
+        });
+        bodyEl.appendChild(widget);
+
+        // Mount interactive draggable facecam ROI box
+        setTimeout(() => {
+          const container = widget.querySelector(`.roi-container-${node.id}`);
+          if (container) {
+            const initialRoi = props.face_roi || { x: 0.02, y: 0.05, w: 0.22, h: 0.28 };
+            props.face_roi = initialRoi;
+            const ctrl = this.setupDraggableRoiBox(container, initialRoi, "#06b6d4", "Facecam", (roi, isFinal) => {
+              props.face_roi = roi;
+              if (isFinal) {
+                this.syncNodeParamDebounced(node.id, "face_roi", roi);
+                this.showToast("Streamer Facecam ROI calibrated");
+              }
+            });
+            this.nodeRoiControllers.set(`${node.id}:face`, ctrl);
+          }
+        }, 50);
+      } else if (node.type === "GamblingOCRNode") {
+        const widget = document.createElement("div");
+        widget.setAttribute("class", "node-widget");
+        const currentPreset = props.preset || "pragmatic_standard";
+        widget.innerHTML = `
+          <div class="widget-label">
+            <span>Casino Slot Multi-Region HUD</span>
+            <span class="widget-val" id="g-spin-state-${node.id}" style="color: #94a3b8;">IDLE</span>
+          </div>
+          <div class="roi-tab-bar" id="g-tabs-${node.id}">
+            <button class="roi-tab-btn active" data-target="all">👁️ All ROIs</button>
+            <button class="roi-tab-btn" data-target="balance" style="color:#10b981;">🟩 Balance</button>
+            <button class="roi-tab-btn" data-target="bet" style="color:#38bdf8;">🟦 Bet Size</button>
+            <button class="roi-tab-btn" data-target="win" style="color:#f59e0b;">🟨 Win Payout</button>
+            <button class="roi-tab-btn" data-target="reels" style="color:#a855f7;">🟪 Reels Area</button>
+          </div>
+          <div class="node-roi-container roi-container-${node.id}">
+            <img class="roi-live-img" id="g-live-img-${node.id}" style="display:none;" />
+            <div class="roi-placeholder-text" id="g-placeholder-${node.id}">Live Casino Stream (Drag Boxes to Calibrate)</div>
+          </div>
+          <div class="gambling-hud-grid">
+            <div class="hud-stat-cell">
+              <div class="hud-stat-lbl">Parsed Balance</div>
+              <div class="hud-stat-val" id="g-bal-val-${node.id}">$0.00</div>
+            </div>
+            <div class="hud-stat-cell">
+              <div class="hud-stat-lbl">Active Bet Size</div>
+              <div class="hud-stat-val" id="g-bet-val-${node.id}">$0.00</div>
+            </div>
+            <div class="hud-stat-cell">
+              <div class="hud-stat-lbl">Recent Win</div>
+              <div class="hud-stat-val" id="g-win-val-${node.id}">$0.00</div>
+            </div>
+            <div class="hud-stat-cell">
+              <div class="hud-stat-lbl">Multiplier</div>
+              <div class="hud-stat-val" id="g-mult-val-${node.id}">1.0x</div>
+            </div>
+          </div>
+          <div style="margin-top: 6px; display: flex; align-items: center; justify-content: space-between; gap: 6px;">
+            <span style="font-size: 9px; color: #94a3b8;">Coordinate Preset:</span>
+            <select class="node-channel-select g-preset-select" style="flex: 1; font-size: 10px; background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.15); border-radius: 4px; color: #f8fafc; padding: 2px 4px;">
+              <option value="pragmatic_standard" ${currentPreset === "pragmatic_standard" ? "selected" : ""}>Pragmatic Play Standard</option>
+              <option value="hacksaw_standard" ${currentPreset === "hacksaw_standard" ? "selected" : ""}>Hacksaw Gaming Standard</option>
+              <option value="stake_originals" ${currentPreset === "stake_originals" ? "selected" : ""}>Stake Originals HUD</option>
+              <option value="custom" ${currentPreset === "custom" ? "selected" : ""}>Custom ROI Layout</option>
+            </select>
+          </div>
+        `;
+        const presetSel = widget.querySelector(".g-preset-select");
+        presetSel.addEventListener("change", (e) => {
+          props.preset = e.target.value;
+          this.syncNodeParamDebounced(node.id, "preset", props.preset);
+          this.showToast(`Switched HUD preset to ${e.target.value}`);
+        });
+        bodyEl.appendChild(widget);
+
+        // Mount interactive draggable boxes for balance, bet, win, reels
+        setTimeout(() => {
+          const container = widget.querySelector(`.roi-container-${node.id}`);
+          if (container) {
+            props.rois = props.rois || {
+              balance: { x: 0.05, y: 0.92, w: 0.18, h: 0.06 },
+              bet: { x: 0.42, y: 0.92, w: 0.16, h: 0.06 },
+              win: { x: 0.35, y: 0.50, w: 0.30, h: 0.14 },
+              reels: { x: 0.20, y: 0.15, w: 0.60, h: 0.70 },
+            };
+            const colors = { balance: "#10b981", bet: "#38bdf8", win: "#f59e0b", reels: "#a855f7" };
+            const ctrls = {};
+            for (const [key, rval] of Object.entries(props.rois)) {
+              ctrls[key] = this.setupDraggableRoiBox(container, rval, colors[key] || "#10b981", key.toUpperCase(), (roi, isFinal) => {
+                props.rois[key] = roi;
+                if (isFinal) {
+                  this.syncNodeParamDebounced(node.id, `roi_${key}`, roi);
+                  this.syncNodeParamDebounced(node.id, "rois", props.rois);
+                  this.showToast(`Updated ${key.toUpperCase()} ROI`);
+                }
+              });
+            }
+            this.nodeRoiControllers.set(`${node.id}:gambling`, ctrls);
+
+            // Tab bar switcher
+            const tabs = widget.querySelectorAll(".roi-tab-btn");
+            tabs.forEach((tab) => {
+              tab.addEventListener("click", () => {
+                tabs.forEach((t) => t.classList.remove("active"));
+                tab.classList.add("active");
+                const target = tab.getAttribute("data-target");
+                if (target === "all") {
+                  Object.values(ctrls).forEach((c) => { c.setVisible(true); c.setActive(false); });
+                } else {
+                  Object.entries(ctrls).forEach(([k, c]) => {
+                    c.setVisible(true);
+                    c.setActive(k === target);
+                  });
+                }
+              });
+            });
+          }
+        }, 50);
+      } else if (node.type === "GamblingLedgerNode") {
+        const widget = document.createElement("div");
+        widget.setAttribute("class", "node-widget");
+        widget.innerHTML = `
+          <div class="ledger-hero-card">
+            <div style="font-size: 9px; color: #94a3b8; font-weight: 700; text-transform: uppercase;">Session Net Profit / Loss</div>
+            <div class="ledger-pnl-val pnl-positive" id="ledger-pnl-${node.id}">+$0.00</div>
+          </div>
+          <div class="chasing-warning-badge" id="ledger-chase-badge-${node.id}">
+            ⚠️ LOSS CHASING DETECTED (MARTINGALE BET ESCALATION)
+          </div>
+          <div class="gambling-hud-grid">
+            <div class="hud-stat-cell">
+              <div class="hud-stat-lbl">Winrate (Hit %)</div>
+              <div class="hud-stat-val" id="ledger-winrate-${node.id}">0.0%</div>
+            </div>
+            <div class="hud-stat-cell">
+              <div class="hud-stat-lbl">Current Streak</div>
+              <div class="hud-stat-val" id="ledger-streak-${node.id}">0</div>
+            </div>
+            <div class="hud-stat-cell">
+              <div class="hud-stat-lbl">Experienced RTP</div>
+              <div class="hud-stat-val" id="ledger-rtp-${node.id}">100.0%</div>
+            </div>
+            <div class="hud-stat-cell">
+              <div class="hud-stat-lbl">Max Drawdown</div>
+              <div class="hud-stat-val" id="ledger-drawdown-${node.id}">$0.00</div>
+            </div>
+          </div>
+          <div style="margin-top: 8px;">
+            <div style="font-size: 9px; color: #94a3b8; font-weight: 600; margin-bottom: 2px;">Rolling PnL Curve (Spins History):</div>
+            <canvas class="node-wave-canvas" id="ledger-canvas-${node.id}" width="280" height="48" style="background: rgba(0,0,0,0.5); border-radius: 4px;"></canvas>
           </div>
         `;
         bodyEl.appendChild(widget);
@@ -819,6 +1173,159 @@
           if (valEl) {
             valEl.textContent = `${primarySession.ocr_multiplier || "1.0x"} (${primarySession.ocr_balance || "$0.00"})`;
           }
+          const ocrImg = document.getElementById(`ocr-live-img-${node.id}`);
+          const ocrPlaceholder = document.getElementById(`ocr-placeholder-${node.id}`);
+          const frameB64 = primarySession.stream_frame_b64 || primarySession.cv_thumbnail_b64;
+          if (ocrImg && frameB64) {
+            ocrImg.src = frameB64;
+            ocrImg.style.display = "block";
+            if (ocrPlaceholder) ocrPlaceholder.style.display = "none";
+          }
+        } else if (node.type === "FacecamEmotionNode") {
+          const faceImg = document.getElementById(`face-live-img-${node.id}`);
+          const facePlaceholder = document.getElementById(`face-placeholder-${node.id}`);
+          const tiltNum = document.getElementById(`face-tilt-num-${node.id}`);
+          const tiltPill = document.getElementById(`face-tilt-pill-${node.id}`);
+          const topVal = document.getElementById(`face-top-val-${node.id}`);
+          const euphoriaVal = document.getElementById(`face-euphoria-val-${node.id}`);
+          const valenceVal = document.getElementById(`face-valence-val-${node.id}`);
+          const valenceInd = document.getElementById(`face-valence-ind-${node.id}`);
+          const barsBox = document.getElementById(`face-bars-${node.id}`);
+
+          const frameB64 = primarySession.stream_frame_b64 || primarySession.cv_thumbnail_b64;
+          if (faceImg && frameB64) {
+            faceImg.src = frameB64;
+            faceImg.style.display = "block";
+            if (facePlaceholder) facePlaceholder.style.display = "none";
+          }
+
+          if (primarySession.emotion_tilt !== undefined) {
+            const tilt = primarySession.emotion_tilt;
+            if (tiltNum) tiltNum.textContent = tilt.toFixed(1);
+            if (topVal) topVal.textContent = (primarySession.emotion_top || "neutral").toUpperCase();
+            if (euphoriaVal && primarySession.emotion_euphoria !== undefined) {
+              euphoriaVal.textContent = `${primarySession.emotion_euphoria.toFixed(0)}%`;
+            }
+
+            let tiltColor = "#34d399";
+            let tiltText = "CALM";
+            if (tilt >= 80) { tiltColor = "#ef4444"; tiltText = "🔥 FULL TILT"; }
+            else if (tilt >= 60) { tiltColor = "#f59e0b"; tiltText = "HEATING UP"; }
+            else if (tilt >= 40) { tiltColor = "#38bdf8"; tiltText = "CAUTION"; }
+
+            if (tiltNum) tiltNum.style.color = tiltColor;
+            if (tiltPill) {
+              tiltPill.textContent = tiltText;
+              tiltPill.style.color = tiltColor;
+              tiltPill.style.background = `${tiltColor}22`;
+            }
+
+            if (primarySession.is_tilting) {
+              document.getElementById(`node-${node.id}`)?.classList.add("spiking");
+              this.pulseWiresFromNode(node.id);
+            } else {
+              document.getElementById(`node-${node.id}`)?.classList.remove("spiking");
+            }
+          }
+
+          if (primarySession.emotion_valence !== undefined) {
+            if (valenceVal) valenceVal.textContent = (primarySession.emotion_valence > 0 ? "+" : "") + primarySession.emotion_valence.toFixed(2);
+            if (valenceInd) {
+              const pct = Math.max(5, Math.min(95, ((primarySession.emotion_valence + 1.0) / 2.0) * 100));
+              valenceInd.style.left = `${pct}%`;
+              valenceInd.style.background = primarySession.emotion_valence >= 0 ? "#34d399" : "#ef4444";
+            }
+          }
+
+          if (barsBox && primarySession.emotion_distribution) {
+            const dist = primarySession.emotion_distribution;
+            const barColors = { joy: "#34d399", rage: "#ef4444", shock: "#f59e0b", despair: "#a855f7", neutral: "#64748b" };
+            barsBox.innerHTML = Object.entries(dist).map(([emo, val]) => `
+              <div class="cv-prob-row">
+                <span class="cv-prob-label">${emo}</span>
+                <div class="cv-prob-track"><div class="cv-prob-fill" style="width: ${Math.round(val * 100)}%; background: ${barColors[emo] || '#38bdf8'};"></div></div>
+                <span class="cv-prob-pct" style="color: ${barColors[emo] || '#38bdf8'};">${Math.round(val * 100)}%</span>
+              </div>
+            `).join("");
+          }
+        } else if (node.type === "GamblingOCRNode") {
+          const gImg = document.getElementById(`g-live-img-${node.id}`);
+          const gPlaceholder = document.getElementById(`g-placeholder-${node.id}`);
+          const spinBadge = document.getElementById(`g-spin-state-${node.id}`);
+          const balVal = document.getElementById(`g-bal-val-${node.id}`);
+          const betVal = document.getElementById(`g-bet-val-${node.id}`);
+          const winVal = document.getElementById(`g-win-val-${node.id}`);
+          const multVal = document.getElementById(`g-mult-val-${node.id}`);
+
+          const frameB64 = primarySession.stream_frame_b64 || primarySession.cv_thumbnail_b64;
+          if (gImg && frameB64) {
+            gImg.src = frameB64;
+            gImg.style.display = "block";
+            if (gPlaceholder) gPlaceholder.style.display = "none";
+          }
+
+          if (balVal && primarySession.gambling_balance !== undefined) {
+            balVal.textContent = `$${Number(primarySession.gambling_balance).toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
+          }
+          if (betVal && primarySession.gambling_bet !== undefined) {
+            betVal.textContent = `$${Number(primarySession.gambling_bet).toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
+          }
+          if (winVal && primarySession.gambling_win !== undefined) {
+            winVal.textContent = `$${Number(primarySession.gambling_win).toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
+          }
+          if (multVal && primarySession.gambling_multiplier !== undefined) {
+            multVal.textContent = primarySession.gambling_multiplier ? `${primarySession.gambling_multiplier.toFixed(1)}x` : "1.0x";
+          }
+          if (spinBadge && primarySession.gambling_spin_state) {
+            spinBadge.textContent = primarySession.gambling_spin_state;
+            if (primarySession.gambling_spin_state === "WIN_CELEBRATION") {
+              spinBadge.style.color = "#f59e0b";
+              this.pulseWiresFromNode(node.id);
+            } else if (primarySession.gambling_spin_state === "SPINNING") {
+              spinBadge.style.color = "#38bdf8";
+            } else {
+              spinBadge.style.color = "#94a3b8";
+            }
+          }
+        } else if (node.type === "GamblingLedgerNode") {
+          const ledger = primarySession.gambling_ledger || {};
+          const pnlEl = document.getElementById(`ledger-pnl-${node.id}`);
+          const chaseBadge = document.getElementById(`ledger-chase-badge-${node.id}`);
+          const winrateEl = document.getElementById(`ledger-winrate-${node.id}`);
+          const streakEl = document.getElementById(`ledger-streak-${node.id}`);
+          const rtpEl = document.getElementById(`ledger-rtp-${node.id}`);
+          const drawdownEl = document.getElementById(`ledger-drawdown-${node.id}`);
+          const canvas = document.getElementById(`ledger-canvas-${node.id}`);
+
+          const netPnl = ledger.net_pnl !== undefined ? ledger.net_pnl : 0.0;
+          if (pnlEl) {
+            pnlEl.textContent = (netPnl >= 0 ? "+$" : "-$") + Math.abs(netPnl).toLocaleString('en-US', { minimumFractionDigits: 2 });
+            pnlEl.className = `ledger-pnl-val ${netPnl >= 0 ? 'pnl-positive' : 'pnl-negative'}`;
+          }
+
+          if (chaseBadge) {
+            if (ledger.is_chasing_losses) {
+              chaseBadge.style.display = "block";
+              this.pulseWiresFromNode(node.id);
+            } else {
+              chaseBadge.style.display = "none";
+            }
+          }
+
+          if (winrateEl) winrateEl.textContent = `${(ledger.winrate_pct || 0).toFixed(1)}%`;
+          if (streakEl) {
+            const streak = ledger.current_streak || 0;
+            streakEl.textContent = streak > 0 ? `🔥 +${streak} Wins` : (streak < 0 ? `💀 ${Math.abs(streak)} Losses` : "0");
+            streakEl.style.color = streak > 0 ? "#34d399" : (streak < 0 ? "#f43f5e" : "#f8fafc");
+          }
+          if (rtpEl) rtpEl.textContent = `${(ledger.experienced_rtp || 100).toFixed(1)}%`;
+          if (drawdownEl) {
+            drawdownEl.textContent = `-$${(ledger.drawdown_dollars || 0).toFixed(2)} (${(ledger.drawdown_pct || 0).toFixed(1)}%)`;
+          }
+
+          if (canvas && ledger.pnl_history) {
+            this.drawPnlSparkline(canvas, ledger.pnl_history);
+          }
         } else if (node.type === "CVTransformerNode") {
           const topValEl = document.getElementById(`cv-top-val-${node.id}`);
           const latencyTag = document.getElementById(`cv-latency-tag-${node.id}`);
@@ -917,6 +1424,185 @@
       ctx.shadowBlur = 0;
     }
 
+    drawPnlSparkline(canvas, history) {
+      const ctx = canvas.getContext("2d");
+      const w = canvas.width;
+      const h = canvas.height;
+      ctx.clearRect(0, 0, w, h);
+
+      // Draw dashed baseline zero
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.15)";
+      ctx.lineWidth = 1;
+      ctx.setLineDash([3, 3]);
+      ctx.beginPath();
+      ctx.moveTo(0, h / 2);
+      ctx.lineTo(w, h / 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      if (!history || history.length < 2) return;
+
+      const pnlVals = history.map(d => typeof d === "object" ? d.pnl : d);
+      const maxPnl = Math.max(...pnlVals, 100);
+      const minPnl = Math.min(...pnlVals, -100);
+      const range = Math.max(1, maxPnl - minPnl);
+
+      const latestPnl = pnlVals[pnlVals.length - 1];
+      const strokeColor = latestPnl >= 0 ? "#10b981" : "#f43f5e";
+
+      ctx.beginPath();
+      ctx.strokeStyle = strokeColor;
+      ctx.lineWidth = 2;
+      ctx.shadowBlur = 6;
+      ctx.shadowColor = strokeColor;
+
+      const step = w / (pnlVals.length - 1);
+      pnlVals.forEach((p, idx) => {
+        const x = idx * step;
+        const norm = (p - minPnl) / range;
+        const y = h - (norm * (h - 8) + 4);
+        if (idx === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+    }
+
+    openStreamCalibrator() {
+      let modal = document.getElementById("stream-roi-calibrator-modal");
+      if (!modal) {
+        modal = document.createElement("div");
+        modal.id = "stream-roi-calibrator-modal";
+        modal.innerHTML = `
+          <div class="calibrator-window">
+            <div class="calibrator-header">
+              <div style="font-weight: 800; font-size: 13px; color: #38bdf8; display: flex; align-items: center; gap: 8px;">
+                <span>🎯 Live Stream Content ROI Calibrator</span>
+                <span style="font-size: 10px; color: #94a3b8; font-weight: 400;">(Drag & resize boxes over stream to emphasize content)</span>
+              </div>
+              <button class="studio-btn" id="calibrator-close-btn" style="padding: 4px 10px; font-size: 11px;">✕ Close</button>
+            </div>
+            <div class="calibrator-body">
+              <div class="calibrator-canvas-wrap" id="calibrator-canvas-container">
+                <img id="calibrator-stream-frame" class="roi-live-img" alt="Stream Frame" />
+                <div class="roi-placeholder-text" id="calibrator-placeholder">Waiting for stream frame...</div>
+              </div>
+              <div class="calibrator-sidebar">
+                <div style="font-size: 11px; font-weight: 700; color: #e2e8f0; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 4px;">
+                  Active Content Regions
+                </div>
+                <div id="calibrator-box-list" style="display: flex; flex-direction: column; gap: 8px;"></div>
+                <div style="margin-top: auto; display: flex; gap: 8px;">
+                  <button class="studio-btn primary" id="calibrator-apply-btn" style="flex: 1; text-align: center;">💾 Apply to DAG</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        `;
+        document.body.appendChild(modal);
+
+        modal.querySelector("#calibrator-close-btn")?.addEventListener("click", () => {
+          modal.classList.remove("active");
+        });
+        modal.querySelector("#calibrator-apply-btn")?.addEventListener("click", () => {
+          this.syncGraph();
+          this.showToast("All stream content ROIs saved and synced to pipeline!");
+          modal.classList.remove("active");
+        });
+      }
+
+      modal.classList.add("active");
+
+      // Update frame preview from latest stream telemetry
+      const targetCh = (this.selectedChannel || "marlon").toLowerCase();
+      const frameEl = modal.querySelector("#calibrator-stream-frame");
+      const placeEl = modal.querySelector("#calibrator-placeholder");
+      const primarySession = window.latestTelemetry?.sessions?.[targetCh] || Object.values(window.latestTelemetry?.sessions || {})[0];
+      const frameB64 = primarySession?.stream_frame_b64 || primarySession?.cv_thumbnail_b64;
+      if (frameB64 && frameEl) {
+        frameEl.src = frameB64;
+        if (placeEl) placeEl.style.display = "none";
+      }
+
+      // Populate boxes
+      const canvasContainer = modal.querySelector("#calibrator-canvas-container");
+      canvasContainer.querySelectorAll(".roi-draggable-box").forEach(b => b.remove());
+
+      const listEl = modal.querySelector("#calibrator-box-list");
+      listEl.innerHTML = "";
+
+      const registeredRois = [];
+
+      this.nodes.forEach(n => {
+        if (n.type === "FacecamEmotionNode") {
+          registeredRois.push({
+            nodeId: n.id,
+            paramKey: "face_roi",
+            label: "Streamer Facecam",
+            color: "#06b6d4",
+            roi: n.properties?.face_roi || { x: 0.02, y: 0.05, w: 0.22, h: 0.28 },
+          });
+        } else if (n.type === "GamblingOCRNode") {
+          const rois = n.properties?.rois || {
+            balance: { x: 0.05, y: 0.92, w: 0.18, h: 0.06 },
+            bet: { x: 0.42, y: 0.92, w: 0.16, h: 0.06 },
+            win: { x: 0.35, y: 0.50, w: 0.30, h: 0.14 },
+            reels: { x: 0.20, y: 0.15, w: 0.60, h: 0.70 },
+          };
+          const gColors = { balance: "#10b981", bet: "#38bdf8", win: "#f59e0b", reels: "#a855f7" };
+          Object.entries(rois).forEach(([k, r]) => {
+            registeredRois.push({
+              nodeId: n.id,
+              subKey: k,
+              paramKey: `roi_${k}`,
+              label: `Casino ${k.toUpperCase()}`,
+              color: gColors[k] || "#10b981",
+              roi: r,
+            });
+          });
+        } else if (n.type === "OCRVisionNode") {
+          registeredRois.push({
+            nodeId: n.id,
+            paramKey: "roi",
+            label: "Generic OCR",
+            color: "#10b981",
+            roi: n.properties?.roi || { x: 0.70, y: 0.85, w: 0.28, h: 0.12 },
+          });
+        }
+      });
+
+      registeredRois.forEach(item => {
+        this.setupDraggableRoiBox(canvasContainer, item.roi, item.color, item.label, (newRoi, isFinal) => {
+          item.roi = newRoi;
+          const node = this.nodes.get(item.nodeId);
+          if (node) {
+            if (item.subKey) {
+              node.properties.rois = node.properties.rois || {};
+              node.properties.rois[item.subKey] = newRoi;
+            } else {
+              node.properties[item.paramKey] = newRoi;
+            }
+          }
+          if (isFinal) {
+            this.syncNodeParamDebounced(item.nodeId, item.paramKey, newRoi);
+            const inNodeCtrl = this.nodeRoiControllers.get(`${item.nodeId}:${item.subKey || (item.paramKey.replace('_roi', ''))}`);
+            if (inNodeCtrl) inNodeCtrl.update(newRoi);
+          }
+        });
+
+        const row = document.createElement("div");
+        row.className = "calibrator-box-toggle";
+        row.innerHTML = `
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <div style="width: 10px; height: 10px; border-radius: 2px; background: ${item.color};"></div>
+            <span style="color: #f1f5f9; font-weight: 700;">${item.label}</span>
+          </div>
+          <span style="font-family: monospace; font-size: 10px; color: #94a3b8;">${Math.round(item.roi.w * 100)}x${Math.round(item.roi.h * 100)}%</span>
+        `;
+        listEl.appendChild(row);
+      });
+    }
+
     /* -------------------------------------------------------------
        Floating Toolbar & Spawn Palette
        ------------------------------------------------------------- */
@@ -926,6 +1612,10 @@
 
       document.getElementById("btn-add-node")?.addEventListener("click", () => {
         this.openSpawnPalette(window.innerWidth / 2 - 130, 160);
+      });
+
+      document.getElementById("btn-calibrate-rois")?.addEventListener("click", () => {
+        this.openStreamCalibrator();
       });
 
       document.getElementById("btn-sync-graph")?.addEventListener("click", () => {
@@ -1037,6 +1727,32 @@
           { id: "confidence", name: "Top Confidence", type: "scalar" },
           { id: "top_label", name: "Top Class", type: "text" },
         ];
+      } else if (type === "FacecamEmotionNode") {
+        inputs = [{ id: "video_in", name: "Video In", type: "video" }];
+        outputs = [
+          { id: "tilt_trigger", name: "Tilt Trigger", type: "trigger" },
+          { id: "euphoria_trigger", name: "Euphoria Trigger", type: "trigger" },
+          { id: "tilt_score", name: "Tilt Index", type: "scalar" },
+          { id: "valence", name: "Valence", type: "scalar" },
+        ];
+      } else if (type === "GamblingOCRNode") {
+        inputs = [{ id: "video_in", name: "Video In", type: "video" }];
+        outputs = [
+          { id: "balance", name: "Balance", type: "scalar" },
+          { id: "bet", name: "Bet Size", type: "scalar" },
+          { id: "win", name: "Win Payout", type: "scalar" },
+          { id: "multiplier", name: "Multiplier", type: "scalar" },
+          { id: "ocr_data", name: "OCR Metrics", type: "scalar" },
+        ];
+      } else if (type === "GamblingLedgerNode") {
+        inputs = [{ id: "ocr_in", name: "OCR Data In", type: "scalar" }];
+        outputs = [
+          { id: "big_win_trigger", name: "Big Win Trigger", type: "trigger" },
+          { id: "tilt_bet_trigger", name: "Martingale Tilt Trigger", type: "trigger" },
+          { id: "net_pnl", name: "Net PnL ($)", type: "scalar" },
+          { id: "winrate", name: "Winrate %", type: "scalar" },
+          { id: "rtp", name: "Experienced RTP %", type: "scalar" },
+        ];
       } else if (type === "GateEvaluatorNode") {
         inputs = [
           { id: "trigger_1", name: "Trigger In 1", type: "trigger" },
@@ -1082,12 +1798,12 @@
         if (node.type === "StreamSourceNode") {
           node.position = [streamX, yCounters.col1];
           yCounters.col1 += 260;
-        } else if (["AudioMonitorNode", "ChatVelocityNode", "CVTransformerNode", "OCRVisionNode", "ScreenSummarizerNode"].includes(node.type)) {
+        } else if (["AudioMonitorNode", "ChatVelocityNode", "CVTransformerNode", "OCRVisionNode", "FacecamEmotionNode", "GamblingOCRNode", "ScreenSummarizerNode"].includes(node.type)) {
           node.position = [col2X, yCounters.col2];
-          yCounters.col2 += (node.type === "CVTransformerNode" ? 340 : 220);
-        } else if (node.type === "GateEvaluatorNode") {
+          yCounters.col2 += (node.type === "CVTransformerNode" || node.type === "FacecamEmotionNode" || node.type === "GamblingOCRNode" ? 340 : 220);
+        } else if (node.type === "GamblingLedgerNode" || node.type === "GateEvaluatorNode") {
           node.position = [col3X, yCounters.col3];
-          yCounters.col3 += 200;
+          yCounters.col3 += 240;
         } else if (node.type === "SegmentSlicerNode") {
           node.position = [col4X, yCounters.col4];
           yCounters.col4 += 200;

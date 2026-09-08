@@ -1790,6 +1790,10 @@
           <span id="source-icon">📺</span>
           <span id="source-text">Source: Direct</span>
         </button>
+        <button id="btn-stream-rois" class="btn-source-toggle" onclick="toggleMainStreamRoiOverlay()" title="Drag & calibrate content ROIs directly over the live stream player">
+          <span id="rois-icon">🎯</span>
+          <span id="rois-text">Stream ROIs</span>
+        </button>
         <button id="btn-summarize-screen" class="btn-summarize-screen" onclick="triggerScreenSummary()" title="Capture current frame & chat to summarize screen state">
           <span id="summarize-btn-icon">📸</span>
           <span id="summarize-btn-text">Summarize Screen</span>
@@ -1807,7 +1811,13 @@
     </div>
 
     <!-- Twitch Player Frame -->
-    <div id="twitch-frame"></div>
+    <div id="twitch-frame">
+      <div id="main-stream-roi-overlay" style="display:none; position:absolute; top:0; left:0; width:100%; height:100%; z-index:100; pointer-events:auto;">
+        <div id="main-stream-roi-banner" style="position:absolute; top:72px; left:50%; transform:translateX(-50%); background:rgba(15,23,42,0.92); border:1px solid #38bdf8; border-radius:20px; padding:6px 18px; font-size:11px; font-weight:700; color:#38bdf8; pointer-events:none; box-shadow:0 4px 20px rgba(0,0,0,0.6); z-index:1000;">
+          🎯 Stream Content Calibration Active — Drag and resize boxes directly over the live stream!
+        </div>
+      </div>
+    </div>
 
     <!-- Multimodal Screen State Intel Card (Center-Left) -->
     <div id="screen-summary-card" class="screen-intel-widget" style="display: none;">
@@ -2081,6 +2091,7 @@
     <div id="studio-toolbar">
       <button class="studio-btn primary" id="btn-add-node">➕ Add Node</button>
       <div class="toolbar-divider"></div>
+      <button class="studio-btn" id="btn-calibrate-rois">🎯 Calibrate Stream ROIs</button>
       <button class="studio-btn" id="btn-auto-layout">📐 Auto-Layout</button>
       <button class="studio-btn" id="btn-sync-graph">💾 Sync DAG</button>
       <button class="studio-btn" id="btn-reset-view">🎯 Center View</button>
@@ -2918,6 +2929,7 @@
       ws.onmessage = (evt) => {
         try {
           const msg = JSON.parse(evt.data);
+          window.latestTelemetry = msg;
           if (window.NodeStudio) {
             window.NodeStudio.applyTelemetry(msg);
           }
@@ -3628,6 +3640,92 @@
         if (studioContainer) studioContainer.classList.remove("active");
         if (btnHud) btnHud.classList.add("active");
         if (btnStudio) btnStudio.classList.remove("active");
+      }
+    }
+
+    let isMainStreamRoiOverlayActive = false;
+    function toggleMainStreamRoiOverlay() {
+      const overlay = document.getElementById("main-stream-roi-overlay");
+      const btn = document.getElementById("btn-stream-rois");
+      if (!overlay) return;
+
+      isMainStreamRoiOverlayActive = !isMainStreamRoiOverlayActive;
+      if (isMainStreamRoiOverlayActive) {
+        overlay.style.display = "block";
+        if (btn) btn.classList.add("active");
+
+        // Clear existing boxes
+        overlay.querySelectorAll(".roi-draggable-box").forEach((b) => b.remove());
+
+        if (window.NodeStudio) {
+          const registeredRois = [];
+          window.NodeStudio.nodes.forEach((n) => {
+            if (n.type === "FacecamEmotionNode") {
+              registeredRois.push({
+                nodeId: n.id,
+                paramKey: "face_roi",
+                label: "Streamer Facecam",
+                color: "#06b6d4",
+                roi: n.properties?.face_roi || { x: 0.02, y: 0.05, w: 0.22, h: 0.28 },
+              });
+            } else if (n.type === "GamblingOCRNode") {
+              const rois = n.properties?.rois || {
+                balance: { x: 0.05, y: 0.92, w: 0.18, h: 0.06 },
+                bet: { x: 0.42, y: 0.92, w: 0.16, h: 0.06 },
+                win: { x: 0.35, y: 0.50, w: 0.30, h: 0.14 },
+                reels: { x: 0.20, y: 0.15, w: 0.60, h: 0.70 },
+              };
+              const gColors = { balance: "#10b981", bet: "#38bdf8", win: "#f59e0b", reels: "#a855f7" };
+              Object.entries(rois).forEach(([k, r]) => {
+                registeredRois.push({
+                  nodeId: n.id,
+                  subKey: k,
+                  paramKey: `roi_${k}`,
+                  label: `Casino ${k.toUpperCase()}`,
+                  color: gColors[k] || "#10b981",
+                  roi: r,
+                });
+              });
+            } else if (n.type === "OCRVisionNode") {
+              registeredRois.push({
+                nodeId: n.id,
+                paramKey: "roi",
+                label: "Generic OCR",
+                color: "#10b981",
+                roi: n.properties?.roi || { x: 0.70, y: 0.85, w: 0.28, h: 0.12 },
+              });
+            }
+          });
+
+          registeredRois.forEach((item) => {
+            window.NodeStudio.setupDraggableRoiBox(overlay, item.roi, item.color, item.label, (newRoi, isFinal) => {
+              item.roi = newRoi;
+              const node = window.NodeStudio.nodes.get(item.nodeId);
+              if (node) {
+                if (item.subKey) {
+                  node.properties.rois = node.properties.rois || {};
+                  node.properties.rois[item.subKey] = newRoi;
+                } else {
+                  node.properties[item.paramKey] = newRoi;
+                }
+              }
+              if (isFinal) {
+                window.NodeStudio.syncNodeParamDebounced(item.nodeId, item.paramKey, newRoi);
+                const inNodeCtrl = window.NodeStudio.nodeRoiControllers.get(
+                  `${item.nodeId}:${item.subKey || item.paramKey.replace("_roi", "")}`
+                );
+                if (inNodeCtrl) inNodeCtrl.update(newRoi);
+              }
+            });
+          });
+        }
+      } else {
+        overlay.style.display = "none";
+        if (btn) btn.classList.remove("active");
+        if (window.NodeStudio) {
+          window.NodeStudio.syncGraph();
+          window.NodeStudio.showToast("Stream ROIs saved and synced!");
+        }
       }
     }
   </script>

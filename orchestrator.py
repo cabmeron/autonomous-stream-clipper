@@ -1,4 +1,6 @@
 import asyncio
+import base64
+import io
 import json
 import logging
 import os
@@ -16,6 +18,9 @@ from services.ingest.twitch_irc import TwitchChatVelocityEngine
 from services.heuristics.audio_monitor import AudioDecibelMonitor
 from services.heuristics.ocr_engine import BoundedRegionOCR
 from services.heuristics.cv_transformer import CVTransformerService
+from services.heuristics.streamer_emotion import StreamerEmotionService
+from services.heuristics.gambling_ocr import GamblingOCREngine
+from services.heuristics.gambling_ledger import GamblingLedger
 from services.heuristics.gate_evaluator import GateEvaluator
 from services.heuristics.chat_descriptor import LocalChatDescriptorService
 from services.heuristics.screen_summarizer import ScreenStateSummarizerService
@@ -93,6 +98,21 @@ class StreamSession:
             on_trigger_callback=self._on_cv_trigger,
         )
 
+        # 4c. Streamer Facial Emotion & Tilt Tracking
+        self.streamer_emotion = StreamerEmotionService(
+            on_tilt_spike=self._on_tilt_spike,
+            on_euphoria_spike=self._on_euphoria_spike,
+        )
+
+        # 4d. Multi-Region Gambling OCR & Spin Motion Engine
+        self.gambling_ocr = GamblingOCREngine()
+
+        # 4e. Gambling Session Financial Ledger & Winrate Engine
+        self.gambling_ledger = GamblingLedger(
+            on_big_win=self._on_gambling_big_win,
+            on_tilt_bet=self._on_gambling_tilt_bet,
+        )
+
         # 5. Gate Evaluator
         self.gate_evaluator = GateEvaluator(
             on_trigger_dispatch=self._on_clip_trigger,
@@ -134,6 +154,20 @@ class StreamSession:
             "cv_boxes": [],
             "cv_latency_ms": 0.0,
             "cv_thumbnail_b64": "",
+            "emotion_top": "neutral",
+            "emotion_confidence": 0.0,
+            "emotion_distribution": {},
+            "emotion_valence": 0.0,
+            "emotion_arousal": 0.0,
+            "emotion_tilt": 0.0,
+            "emotion_euphoria": 0.0,
+            "is_tilting": False,
+            "gambling_balance": 0.0,
+            "gambling_bet": 0.0,
+            "gambling_win": 0.0,
+            "gambling_multiplier": 0.0,
+            "gambling_spin_state": "IDLE",
+            "stream_frame_b64": "",
         }
         self.last_analyzed_segment: Optional[str] = None
 
@@ -216,6 +250,69 @@ class StreamSession:
             cv_label=top_label,
         )
 
+    def _on_tilt_spike(self, metrics: dict):
+        top_emo = metrics.get("top_emotion", "rage")
+        tilt = metrics.get("tilt_score", 0.0)
+        logger.warning("[Session:%s][TiltSpike] Streamer tilting: %s (Tilt Index: %.1f/100)", self.channel, top_emo, tilt)
+        self.gate_evaluator.evaluate_signals(
+            source=f"streamer_tilt_{top_emo}",
+            chat_instant=self.chat_engine.v_instant if self.chat_engine else 0.0,
+            chat_ratio=self.chat_engine.spike_ratio if self.chat_engine else 1.0,
+            win_multiplier=self.ocr_engine.current_multiplier if self.ocr_engine else 1.0,
+            pnl_delta=self.gambling_ledger.get_net_pnl() if getattr(self, "gambling_ledger", None) else 0.0,
+            audio_db=self.audio_monitor.current_db if self.audio_monitor else -60.0,
+            audio_delta=self.audio_monitor.delta_db if self.audio_monitor else 0.0,
+            cv_score=tilt / 100.0,
+            cv_label=f"tilt_{top_emo}",
+        )
+
+    def _on_euphoria_spike(self, metrics: dict):
+        euphoria = metrics.get("euphoria_score", 0.0)
+        logger.info("[Session:%s][EuphoriaSpike] Streamer ecstatic! Euphoria: %.1f/100", self.channel, euphoria)
+        self.gate_evaluator.evaluate_signals(
+            source="streamer_euphoria",
+            chat_instant=self.chat_engine.v_instant if self.chat_engine else 0.0,
+            chat_ratio=self.chat_engine.spike_ratio if self.chat_engine else 1.0,
+            win_multiplier=self.ocr_engine.current_multiplier if self.ocr_engine else 1.0,
+            pnl_delta=self.gambling_ledger.get_net_pnl() if getattr(self, "gambling_ledger", None) else 0.0,
+            audio_db=self.audio_monitor.current_db if self.audio_monitor else -60.0,
+            audio_delta=self.audio_monitor.delta_db if self.audio_monitor else 0.0,
+            cv_score=euphoria / 100.0,
+            cv_label="victory celebration",
+        )
+
+    def _on_gambling_big_win(self, data: dict):
+        win_amt = data.get("win_amount", 0.0)
+        mult = data.get("multiplier", 1.0)
+        logger.info("[Session:%s][BigWin] Payout: $%.2f (%.1fx)", self.channel, win_amt, mult)
+        self.gate_evaluator.evaluate_signals(
+            source="gambling_big_win",
+            chat_instant=self.chat_engine.v_instant if self.chat_engine else 0.0,
+            chat_ratio=self.chat_engine.spike_ratio if self.chat_engine else 1.0,
+            win_multiplier=mult,
+            pnl_delta=win_amt,
+            audio_db=self.audio_monitor.current_db if self.audio_monitor else -60.0,
+            audio_delta=self.audio_monitor.delta_db if self.audio_monitor else 0.0,
+            cv_score=1.0,
+            cv_label="jackpot win",
+        )
+
+    def _on_gambling_tilt_bet(self, data: dict):
+        esc = data.get("escalation_ratio", 2.0)
+        cur_bet = data.get("current_bet", 0.0)
+        logger.warning("[Session:%s][TiltBet] Loss-chasing bet escalation: %.1fx ($%.2f)", self.channel, esc, cur_bet)
+        self.gate_evaluator.evaluate_signals(
+            source="gambling_tilt_bet",
+            chat_instant=self.chat_engine.v_instant if self.chat_engine else 0.0,
+            chat_ratio=self.chat_engine.spike_ratio if self.chat_engine else 1.0,
+            win_multiplier=1.0,
+            pnl_delta=self.gambling_ledger.get_net_pnl() if getattr(self, "gambling_ledger", None) else 0.0,
+            audio_db=self.audio_monitor.current_db if self.audio_monitor else -60.0,
+            audio_delta=self.audio_monitor.delta_db if self.audio_monitor else 0.0,
+            cv_score=0.85,
+            cv_label="rage tilt bet",
+        )
+
     def _on_trigger_activated(self, context: dict):
         """Immediately instantiates a tracked clipping job upon excitement spike detection."""
         job_id = self.orchestrator.create_job(self.channel, context)
@@ -251,6 +348,27 @@ class StreamSession:
             "ocr_balance": self.extra_telemetry["ocr_balance"],
             "ocr_multiplier": self.extra_telemetry["ocr_multiplier"],
             "ocr_pnl_delta": self.extra_telemetry["ocr_pnl_delta"],
+            "cv_top_label": self.extra_telemetry.get("cv_top_label", "standby"),
+            "cv_confidence": self.extra_telemetry.get("cv_confidence", 0.0),
+            "cv_probabilities": self.extra_telemetry.get("cv_probabilities", {}),
+            "cv_boxes": self.extra_telemetry.get("cv_boxes", []),
+            "cv_latency_ms": self.extra_telemetry.get("cv_latency_ms", 0.0),
+            "cv_thumbnail_b64": self.extra_telemetry.get("cv_thumbnail_b64", ""),
+            "stream_frame_b64": self.extra_telemetry.get("stream_frame_b64", ""),
+            "emotion_top": self.extra_telemetry.get("emotion_top", "neutral"),
+            "emotion_confidence": self.extra_telemetry.get("emotion_confidence", 0.0),
+            "emotion_distribution": self.extra_telemetry.get("emotion_distribution", {}),
+            "emotion_valence": self.extra_telemetry.get("emotion_valence", 0.0),
+            "emotion_arousal": self.extra_telemetry.get("emotion_arousal", 0.0),
+            "emotion_tilt": self.extra_telemetry.get("emotion_tilt", 0.0),
+            "emotion_euphoria": self.extra_telemetry.get("emotion_euphoria", 0.0),
+            "is_tilting": self.extra_telemetry.get("is_tilting", False),
+            "gambling_balance": self.extra_telemetry.get("gambling_balance", 0.0),
+            "gambling_bet": self.extra_telemetry.get("gambling_bet", 0.0),
+            "gambling_win": self.extra_telemetry.get("gambling_win", 0.0),
+            "gambling_multiplier": self.extra_telemetry.get("gambling_multiplier", 0.0),
+            "gambling_spin_state": self.extra_telemetry.get("gambling_spin_state", "IDLE"),
+            "gambling_ledger": self.gambling_ledger.get_summary() if getattr(self, "gambling_ledger", None) else {},
             "buffered_messages": calc["buffered_messages"],
             "total_messages": calc.get("total_messages", 0),
             "buffered_segments": self.buffer.get_segment_count() if self.buffer else 0,
@@ -533,6 +651,76 @@ class StreamClipperOrchestrator:
             "message": f"Manual 60-second clip initiated for #{clean}",
         }
 
+    @staticmethod
+    def _process_video_and_cv_heuristics(session: StreamSession, segment_path: str) -> dict:
+        """Extracts decoded video frame once and runs CV transformers, emotion tracking, gambling OCR and ledger."""
+        results = {}
+        frame = None
+
+        # 1. Decode video frame using CV extractor
+        if getattr(session, "cv_service", None) and hasattr(session.cv_service, "extractor"):
+            try:
+                frame = session.cv_service.extractor.extract_frame(segment_path)
+            except Exception as e:
+                logger.debug("[FrameExtractor] Error extracting frame: %s", e)
+
+        # 2. Run Computer Vision Transformer (Zero-Shot & Object Detection)
+        if ENABLE_CV and getattr(session, "cv_service", None):
+            try:
+                cv_res = session.cv_service.process_segment(segment_path)
+                results["cv_res"] = cv_res
+            except Exception as e:
+                logger.debug("[CVService] Error processing segment: %s", e)
+
+        # 3. Streamer Facial Emotion Recognition & Continuous Tilt Index
+        if getattr(session, "streamer_emotion", None) and frame is not None:
+            try:
+                emotion_res = session.streamer_emotion.process_frame(frame)
+                results["emotion_res"] = emotion_res
+            except Exception as e:
+                logger.debug("[StreamerEmotion] Error processing frame: %s", e)
+
+        # 4. Multi-Region Gambling OCR & Spin State Engine
+        if getattr(session, "gambling_ocr", None) and frame is not None:
+            try:
+                gambling_res = session.gambling_ocr.process_frame(frame)
+                results["gambling_res"] = gambling_res
+
+                # Feed parsed numbers into Gambling Ledger
+                if getattr(session, "gambling_ledger", None) and gambling_res:
+                    session.gambling_ledger.update_from_ocr(gambling_res)
+                    ledger_summary = session.gambling_ledger.get_summary()
+                    results["ledger_summary"] = ledger_summary
+
+                    # Correlate gambling loss streak & bet escalation back into facial emotion service
+                    if getattr(session, "streamer_emotion", None):
+                        streak = ledger_summary.get("current_streak", 0)
+                        loss_streak = abs(streak) if streak < 0 else 0
+                        base_bet = ledger_summary.get("baseline_bet", 0.0) or 1.0
+                        curr_bet = ledger_summary.get("current_bet", 0.0)
+                        session.streamer_emotion.update_gambling_context(
+                            loss_streak=loss_streak,
+                            bet_escalation=(curr_bet / base_bet) if base_bet > 0 else 1.0,
+                        )
+            except Exception as e:
+                logger.debug("[GamblingOCR] Error processing frame: %s", e)
+
+        # 5. Generate clean, compressed JPEG base64 frame thumbnail for in-node and stream ROI dragging
+        thumb_b64 = ""
+        if frame is not None:
+            try:
+                t_buf = io.BytesIO()
+                thumb = frame.resize((480, 270))
+                thumb.save(t_buf, format="JPEG", quality=60)
+                thumb_b64 = "data:image/jpeg;base64," + base64.b64encode(t_buf.getvalue()).decode("utf-8")
+            except Exception as e:
+                logger.debug("[Thumbnail] Error generating thumbnail: %s", e)
+        elif results.get("cv_res") and results["cv_res"].get("thumbnail_b64"):
+            thumb_b64 = results["cv_res"]["thumbnail_b64"]
+        results["stream_frame_b64"] = thumb_b64
+
+        return results
+
     async def heuristics_polling_loop(self):
         """Periodically samples the newest video segment for each active session for audio & OCR."""
         logger.info("[Orchestrator] Starting multi-session heuristics polling loop (1 Hz)...")
@@ -562,16 +750,39 @@ class StreamClipperOrchestrator:
                                 session.extra_telemetry["ocr_multiplier"] = f"{ocr_res['multiplier']:.1f}x"
                                 session.extra_telemetry["ocr_pnl_delta"] = ocr_res["pnl_delta"]
 
-                        # 3. Analyze Computer Vision Transformer (Zero-Shot & Object Detection)
-                        if ENABLE_CV and getattr(session, "cv_service", None):
-                            cv_res = await asyncio.to_thread(session.cv_service.process_segment, latest_seg)
-                            if cv_res:
+                        # 3. Analyze Computer Vision, Emotion & Gambling HUD
+                        heur_res = await asyncio.to_thread(self._process_video_and_cv_heuristics, session, latest_seg)
+                        if heur_res:
+                            if heur_res.get("stream_frame_b64"):
+                                session.extra_telemetry["stream_frame_b64"] = heur_res["stream_frame_b64"]
+
+                            if heur_res.get("cv_res"):
+                                cv_res = heur_res["cv_res"]
                                 session.extra_telemetry["cv_top_label"] = cv_res["top_label"]
                                 session.extra_telemetry["cv_confidence"] = cv_res["confidence"]
                                 session.extra_telemetry["cv_probabilities"] = cv_res["probabilities"]
                                 session.extra_telemetry["cv_boxes"] = cv_res["detections"]
                                 session.extra_telemetry["cv_latency_ms"] = cv_res["latency_ms"]
                                 session.extra_telemetry["cv_thumbnail_b64"] = cv_res["thumbnail_b64"]
+
+                            if heur_res.get("emotion_res"):
+                                emo = heur_res["emotion_res"]
+                                session.extra_telemetry["emotion_top"] = emo["top_emotion"]
+                                session.extra_telemetry["emotion_confidence"] = emo["confidence"]
+                                session.extra_telemetry["emotion_distribution"] = emo["emotions"]
+                                session.extra_telemetry["emotion_valence"] = emo["valence"]
+                                session.extra_telemetry["emotion_arousal"] = emo["arousal"]
+                                session.extra_telemetry["emotion_tilt"] = emo["tilt_score"]
+                                session.extra_telemetry["emotion_euphoria"] = emo["euphoria_score"]
+                                session.extra_telemetry["is_tilting"] = emo["is_tilt_spike"]
+
+                            if heur_res.get("gambling_res"):
+                                g_res = heur_res["gambling_res"]
+                                session.extra_telemetry["gambling_balance"] = g_res["balance"]
+                                session.extra_telemetry["gambling_bet"] = g_res["bet"]
+                                session.extra_telemetry["gambling_win"] = g_res["win"]
+                                session.extra_telemetry["gambling_multiplier"] = g_res["multiplier"]
+                                session.extra_telemetry["gambling_spin_state"] = g_res["spin_state"]
 
                     # 4. Chat State Description (every X seconds)
                     if session.chat_engine and session.chat_descriptor_service.enabled:
