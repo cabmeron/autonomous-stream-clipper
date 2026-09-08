@@ -18,6 +18,7 @@ CLIENTS: Set[websockets.WebSocketServerProtocol] = set()
 # Global provider function registered by Orchestrator: returns Dict[str, dict]
 sessions_telemetry_provider: Optional[Callable[[], Dict[str, dict]]] = None
 active_jobs_provider: Optional[Callable[[], Dict[str, dict]]] = None
+node_telemetry_provider: Optional[Callable[[], Dict[str, dict]]] = None
 
 # Fallback for single engine (backward compatibility)
 engine = None
@@ -54,10 +55,18 @@ async def broadcast_loop():
                 except Exception as err:
                     logger.debug("[Telemetry] Jobs provider exception: %s", err)
 
+            nodes_data = {}
+            if node_telemetry_provider:
+                try:
+                    nodes_data = node_telemetry_provider()
+                except Exception as err:
+                    logger.debug("[Telemetry] Node provider exception: %s", err)
+
             payload = json.dumps({
                 "type": "telemetry",
                 "sessions": sessions_data,
                 "session_count": len(sessions_data),
+                "nodes": nodes_data,
                 "active_jobs": jobs_data,
                 "recent_clip": recent_clip_notification,
                 "timestamp": time.time(),

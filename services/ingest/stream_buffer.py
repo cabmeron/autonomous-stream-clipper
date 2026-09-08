@@ -2,6 +2,7 @@ import glob
 import logging
 import os
 import platform
+import random
 import re
 import shutil
 import subprocess
@@ -113,6 +114,20 @@ class StreamRingBuffer:
         self.running = False
         self._watchdog_thread: Optional[threading.Thread] = None
 
+        # Exponential backoff parameters for checking if offline streams have gone live
+        self.min_offline_check_interval: float = 10.0   # Start checking after 10s
+        self.max_offline_check_interval: float = 120.0  # Cap check interval at 120s (2 min)
+        self.offline_backoff_factor: float = 1.8        # Backoff multiplier
+        self.current_offline_interval: float = self.min_offline_check_interval
+        self._next_live_check_time: float = 0.0
+
+        # Exponential backoff parameters for process restart failures
+        self.min_restart_interval: float = 5.0
+        self.max_restart_interval: float = 60.0
+        self.restart_backoff_factor: float = 2.0
+        self.current_restart_interval: float = self.min_restart_interval
+        self._last_process_start_time: float = 0.0
+
     def _build_env(self) -> dict:
         """Constructs environment with venv and standard binary directories on PATH."""
         env = dict(os.environ)
@@ -143,6 +158,7 @@ class StreamRingBuffer:
         """Starts the stream ingestion or simulation subprocess."""
         os.makedirs(self.shm_dir, exist_ok=True)
         out_pattern = os.path.join(self.shm_dir, "seg_%02d.ts")
+        self._last_process_start_time = time.time()
 
         if self.simulate:
             self.is_standby = False
@@ -161,6 +177,7 @@ class StreamRingBuffer:
             live_url = self._resolve_live_m3u8()
             if live_url:
                 self.is_standby = False
+                self.current_offline_interval = self.min_offline_check_interval
                 logger.info("[Buffer:%s] Live Twitch broadcast detected! Ingesting direct HLS stream...", self.channel)
                 cmd = (
                     f'ffmpeg -hide_banner -loglevel error '
@@ -171,7 +188,13 @@ class StreamRingBuffer:
                 )
             else:
                 self.is_standby = True
-                logger.info("[Buffer:%s] Channel is currently OFFLINE on Twitch. Running standby feed until stream goes live...", self.channel)
+                self.current_offline_interval = self.min_offline_check_interval
+                self._next_live_check_time = time.time() + self.current_offline_interval
+                logger.info(
+                    "[Buffer:%s] Channel is currently OFFLINE on Twitch. Running standby feed until stream goes live (first check in %.1fs)...",
+                    self.channel,
+                    self.current_offline_interval,
+                )
                 cmd = (
                     f'ffmpeg -hide_banner -loglevel error '
                     f'-re -f lavfi -i "testsrc=size=1920x1080:rate=30" '
@@ -198,30 +221,84 @@ class StreamRingBuffer:
         )
 
     def _watchdog_loop(self):
-        """Monitors the ingestion process and checks if offline streams go live."""
+        """Monitors the ingestion process and checks if offline streams go live with exponential backoff."""
         while self.running:
-            if self.is_standby and not self.simulate:
-                # Channel was offline; check if it has gone live
-                live_url = self._resolve_live_m3u8()
-                if live_url:
-                    logger.info("[Buffer:%s] Channel has gone LIVE! Switching from standby to live Twitch feed...", self.channel)
-                    if self.process:
-                        try:
-                            if platform.system() != "Windows":
-                                os.killpg(os.getpgid(self.process.pid), 15)
-                            else:
-                                self.process.terminate()
-                        except Exception:
-                            pass
-                    self._start_ingest_process()
+            now = time.time()
 
+            # 1. Standby state: channel is offline, poll for stream going live using exponential backoff
+            if self.is_standby and not self.simulate:
+                if now >= self._next_live_check_time:
+                    live_url = self._resolve_live_m3u8()
+                    if live_url:
+                        logger.info(
+                            "[Buffer:%s] Channel has gone LIVE! Switching from standby to live Twitch feed...",
+                            self.channel,
+                        )
+                        self.current_offline_interval = self.min_offline_check_interval
+                        if self.process:
+                            try:
+                                if platform.system() != "Windows":
+                                    try:
+                                        pgid = os.getpgid(self.process.pid)
+                                        if pgid != os.getpgrp() and pgid > 1:
+                                            os.killpg(pgid, 15)
+                                        else:
+                                            self.process.terminate()
+                                    except (ProcessLookupError, OSError):
+                                        self.process.terminate()
+                                else:
+                                    self.process.terminate()
+                            except Exception:
+                                pass
+                        self._start_ingest_process()
+                    else:
+                        # Stream remains offline: schedule next check with exponential backoff and jitter
+                        jitter = random.uniform(-0.1, 0.1) * self.current_offline_interval
+                        effective_delay = max(
+                            self.min_offline_check_interval,
+                            min(self.max_offline_check_interval, self.current_offline_interval + jitter),
+                        )
+                        self._next_live_check_time = now + effective_delay
+                        logger.info(
+                            "[Buffer:%s] Channel still offline. Next live check in %.1fs (exponential backoff, cap %ds)",
+                            self.channel,
+                            effective_delay,
+                            int(self.max_offline_check_interval),
+                        )
+                        # Advance backoff interval for next cycle
+                        self.current_offline_interval = min(
+                            self.max_offline_check_interval,
+                            self.current_offline_interval * self.offline_backoff_factor,
+                        )
+
+            # 2. Check if the ingest process ended unexpectedly
             if not self.is_alive():
                 if self.running:
-                    logger.info("[Buffer:%s] Ingest process ended. Restarting in 5s...", self.channel)
-                    time.sleep(5)
+                    uptime = now - self._last_process_start_time
+                    if uptime < 15.0:
+                        restart_delay = self.current_restart_interval
+                        self.current_restart_interval = min(
+                            self.max_restart_interval,
+                            self.current_restart_interval * self.restart_backoff_factor,
+                        )
+                    else:
+                        self.current_restart_interval = self.min_restart_interval
+                        restart_delay = self.min_restart_interval
+
+                    logger.info(
+                        "[Buffer:%s] Ingest process ended. Restarting in %.1fs (backoff)...",
+                        self.channel,
+                        restart_delay,
+                    )
+                    # Sleep in small ticks to remain responsive to stop()
+                    sleep_deadline = time.time() + restart_delay
+                    while self.running and time.time() < sleep_deadline:
+                        time.sleep(0.5)
+
                     if self.running:
                         self._start_ingest_process()
-            time.sleep(4)
+
+            time.sleep(1.0)
 
     def start(self):
         """Starts ingestion and launches the background supervisor watchdog."""
@@ -268,7 +345,14 @@ class StreamRingBuffer:
         if self.process:
             try:
                 if platform.system() != "Windows":
-                    os.killpg(os.getpgid(self.process.pid), 15)
+                    try:
+                        pgid = os.getpgid(self.process.pid)
+                        if pgid != os.getpgrp() and pgid > 1:
+                            os.killpg(pgid, 15)
+                        else:
+                            self.process.terminate()
+                    except (ProcessLookupError, OSError):
+                        self.process.terminate()
                 else:
                     self.process.terminate()
                 self.process.wait(timeout=5)

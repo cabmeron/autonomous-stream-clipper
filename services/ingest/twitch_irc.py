@@ -62,6 +62,9 @@ class TwitchChatVelocityEngine:
         uri = "wss://irc-ws.chat.twitch.tv:443"
         self.running = True
 
+        reconnect_delay = 3.0
+        max_reconnect_delay = 60.0
+
         while self.running:
             try:
                 random_id = random.randint(10000, 99999)
@@ -73,6 +76,7 @@ class TwitchChatVelocityEngine:
                     await ws.send(f"NICK {nick}")
                     await ws.send(f"JOIN #{self.channel}")
                     logger.info("[Chat:%s] Connected to Twitch IRC as %s", self.channel, nick)
+                    reconnect_delay = 3.0
 
                     while self.running:
                         raw_msg = await ws.recv()
@@ -97,8 +101,14 @@ class TwitchChatVelocityEngine:
                 break
             except Exception as err:
                 if self.running:
-                    logger.warning("[Chat:%s] Dropped connection: %s. Reconnecting in 3s...", self.channel, err)
-                    await asyncio.sleep(3)
+                    logger.warning(
+                        "[Chat:%s] Dropped connection: %s. Reconnecting in %.1fs (exponential backoff)...",
+                        self.channel,
+                        err,
+                        reconnect_delay,
+                    )
+                    await asyncio.sleep(reconnect_delay)
+                    reconnect_delay = min(max_reconnect_delay, reconnect_delay * 1.8)
 
     def recalculate(self) -> dict:
         """Prunes historical timestamps and calculates current instant/baseline velocity and spike state."""

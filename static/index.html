@@ -6,6 +6,7 @@
   <title>Autonomous Stream Clipper - Multi-Session HUD</title>
   <script src="/hls.min.js"></script>
   <script src="https://player.twitch.tv/js/embed/v1.js"></script>
+  <link rel="stylesheet" href="/static/graph.css" />
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -1766,6 +1767,10 @@
         <div class="brand-tag">⚡ CLIPPER</div>
         <div id="tab-strip"></div>
       </div>
+      <div class="view-mode-toggle">
+        <button id="view-mode-hud" class="view-btn active" onclick="switchViewMode('hud')">📊 HUD</button>
+        <button id="view-mode-studio" class="view-btn" onclick="switchViewMode('studio')">🕸️ Node Studio</button>
+      </div>
       <div class="add-group">
         <input id="channel-input" type="text" placeholder="Add channel or Twitch URL (e.g. zarbex or twitch.tv/zarbex)" onkeydown="if(event.key==='Enter') addStreamSession();" />
         <button class="btn-add" onclick="addStreamSession()">+ Add Stream</button>
@@ -2066,6 +2071,27 @@
     </div>
   </div>
 
+  <!-- ComfyUI Node Graph Studio Container -->
+  <div id="graph-studio-container">
+    <div id="graph-canvas"></div>
+    <svg id="graph-svg-layer"></svg>
+    <div id="graph-nodes-layer"></div>
+
+    <!-- Studio Floating Toolbar -->
+    <div id="studio-toolbar">
+      <button class="studio-btn primary" id="btn-add-node">➕ Add Node</button>
+      <div class="toolbar-divider"></div>
+      <button class="studio-btn" id="btn-auto-layout">📐 Auto-Layout</button>
+      <button class="studio-btn" id="btn-sync-graph">💾 Sync DAG</button>
+      <button class="studio-btn" id="btn-reset-view">🎯 Center View</button>
+    </div>
+
+    <!-- Right-Click / Search Spawn Palette -->
+    <div id="node-spawn-palette">
+      <input type="text" class="spawn-search" placeholder="Search node catalog..." />
+      <div class="spawn-list"></div>
+    </div>
+  </div>
 
   <script>
     let activeTab = null;
@@ -2375,6 +2401,10 @@
       updateActiveHUD();
       drawChart();
       fetchRecentClips();
+
+      if (window.NodeStudio) {
+        window.NodeStudio.setSelectedChannel(channel);
+      }
     }
 
     function mountStreamPlayer(channel) {
@@ -2888,6 +2918,9 @@
       ws.onmessage = (evt) => {
         try {
           const msg = JSON.parse(evt.data);
+          if (window.NodeStudio) {
+            window.NodeStudio.applyTelemetry(msg);
+          }
           if (msg.sessions) {
             const cleanIncoming = {};
             for (const [rawCh, sData] of Object.entries(msg.sessions)) {
@@ -3568,6 +3601,36 @@
 
     fetchRecentClips();
     updateAudioControlsUI();
+
+    function switchViewMode(mode) {
+      const studioContainer = document.getElementById("graph-studio-container");
+      const btnHud = document.getElementById("view-mode-hud");
+      const btnStudio = document.getElementById("view-mode-studio");
+
+      if (mode === "studio") {
+        document.body.classList.add("studio-mode");
+        if (studioContainer) studioContainer.classList.add("active");
+        if (btnStudio) btnStudio.classList.add("active");
+        if (btnHud) btnHud.classList.remove("active");
+        if (window.NodeStudio) {
+          if (activeTab) {
+            window.NodeStudio.setSelectedChannel(activeTab);
+          }
+          requestAnimationFrame(() => {
+            window.NodeStudio.updateTransform();
+            if (window.NodeStudio.nodes.size === 0) {
+              window.NodeStudio.loadGraph();
+            }
+          });
+        }
+      } else {
+        document.body.classList.remove("studio-mode");
+        if (studioContainer) studioContainer.classList.remove("active");
+        if (btnHud) btnHud.classList.add("active");
+        if (btnStudio) btnStudio.classList.remove("active");
+      }
+    }
   </script>
+  <script src="/static/graph.js"></script>
 </body>
 </html>

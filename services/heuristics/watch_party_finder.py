@@ -99,48 +99,77 @@ class WatchPartyFinderService:
                     "variables": {"query": query_term},
                 }
 
-                try:
-                    async with session.post(
-                        self.gql_url,
-                        json=payload,
-                        timeout=aiohttp.ClientTimeout(total=self.timeout_seconds),
-                    ) as resp:
-                        if resp.status != 200:
-                            logger.debug("[WatchPartyFinder] Twitch GQL returned HTTP %d for query '%s'", resp.status, query_term)
-                            continue
+                max_retries = 2
+                retry_delay = 2.0
+                data = None
 
-                        data = await resp.json()
-                        items = (
-                            data.get("data", {})
-                            .get("searchFor", {})
-                            .get("channels", {})
-                            .get("items", [])
-                        )
+                for attempt in range(max_retries + 1):
+                    try:
+                        async with session.post(
+                            self.gql_url,
+                            json=payload,
+                            timeout=aiohttp.ClientTimeout(total=self.timeout_seconds),
+                        ) as resp:
+                            if resp.status == 429:
+                                if attempt < max_retries:
+                                    retry_header = resp.headers.get("Retry-After")
+                                    wait_time = float(retry_header) if retry_header and retry_header.isdigit() else retry_delay
+                                    logger.warning(
+                                        "[WatchPartyFinder] Twitch GQL rate limited (HTTP 429). Backing off for %.1fs (attempt %d/%d)...",
+                                        wait_time, attempt + 1, max_retries,
+                                    )
+                                    await asyncio.sleep(wait_time)
+                                    retry_delay *= 2.0
+                                    continue
+                                else:
+                                    logger.warning("[WatchPartyFinder] Twitch GQL 429 rate limit exceeded. Aborting query to protect IP.")
+                                    break
+                            elif resp.status != 200:
+                                logger.debug("[WatchPartyFinder] Twitch GQL returned HTTP %d for query '%s'", resp.status, query_term)
+                                break
 
-                        for item in items:
-                            login = clean_channel_name(item.get("login", ""))
-                            # Discard self, empty login, or streams that are offline
-                            stream = item.get("stream")
-                            if not login or login == clean_target or not stream:
-                                continue
+                            data = await resp.json()
+                            break
+                    except Exception as e:
+                        logger.debug("[WatchPartyFinder] Query '%s' attempt %d failed: %s", query_term, attempt + 1, e)
+                        if attempt < max_retries:
+                            await asyncio.sleep(retry_delay)
+                            retry_delay *= 1.5
+                        else:
+                            break
 
-                            if login not in found_map:
-                                preview_url = stream.get("previewImageURL") or ""
-                                if preview_url:
-                                    preview_url = preview_url.replace("{width}", "320").replace("{height}", "180")
+                if not data or not isinstance(data, dict):
+                    continue
 
-                                found_map[login] = {
-                                    "id": item.get("id") or str(uuid.uuid4()),
-                                    "login": login,
-                                    "display_name": item.get("displayName") or login,
-                                    "profile_image_url": item.get("profileImageURL") or "",
-                                    "preview_image_url": preview_url,
-                                    "title": stream.get("title") or "",
-                                    "viewers": int(stream.get("viewersCount") or 0),
-                                    "game": (stream.get("game") or {}).get("name") or "Live Stream",
-                                }
-                except Exception as e:
-                    logger.debug("[WatchPartyFinder] Query '%s' failed: %s", query_term, e)
+                items = (
+                    data.get("data", {})
+                    .get("searchFor", {})
+                    .get("channels", {})
+                    .get("items", [])
+                )
+
+                for item in items:
+                    login = clean_channel_name(item.get("login", ""))
+                    # Discard self, empty login, or streams that are offline
+                    stream = item.get("stream")
+                    if not login or login == clean_target or not stream:
+                        continue
+
+                    if login not in found_map:
+                        preview_url = stream.get("previewImageURL") or ""
+                        if preview_url:
+                            preview_url = preview_url.replace("{width}", "320").replace("{height}", "180")
+
+                        found_map[login] = {
+                            "id": item.get("id") or str(uuid.uuid4()),
+                            "login": login,
+                            "display_name": item.get("displayName") or login,
+                            "profile_image_url": item.get("profileImageURL") or "",
+                            "preview_image_url": preview_url,
+                            "title": stream.get("title") or "",
+                            "viewers": int(stream.get("viewersCount") or 0),
+                            "game": (stream.get("game") or {}).get("name") or "Live Stream",
+                        }
 
         raw_candidates = list(found_map.values())
         raw_candidates.sort(key=lambda c: c.get("viewers", 0), reverse=True)
