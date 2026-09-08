@@ -105,12 +105,32 @@ class GraphDAGManager:
                     {"id": "velocity", "name": "Messages/s", "type": "scalar"},
                 ],
             },
+            "node_cv": {
+                "id": "node_cv",
+                "type": "CVTransformerNode",
+                "title": "Hugging Face Vision",
+                "category": "cv",
+                "position": [440, 480],
+                "properties": {
+                    "candidate_labels": "gameplay action, victory celebration, defeat game over, in-game menu, streamer facecam, brb waiting screen",
+                    "trigger_labels": "victory celebration, jackpot win, epic moment",
+                    "confidence_threshold": 0.70,
+                },
+                "inputs": [
+                    {"id": "video_in", "name": "Video In", "type": "video"},
+                ],
+                "outputs": [
+                    {"id": "spike_trigger", "name": "Vision Trigger", "type": "trigger"},
+                    {"id": "confidence", "name": "Top Confidence", "type": "scalar"},
+                    {"id": "top_label", "name": "Top Class", "type": "text"},
+                ],
+            },
             "node_ocr": {
                 "id": "node_ocr",
                 "type": "OCRVisionNode",
                 "title": "OCR / Vision Engine",
                 "category": "ocr",
-                "position": [440, 480],
+                "position": [440, 780],
                 "properties": {
                     "multiplier_threshold": 100.0,
                     "roi": {"x": 0.70, "y": 0.85, "w": 0.28, "h": 0.12},
@@ -139,6 +159,7 @@ class GraphDAGManager:
                     {"id": "trigger_1", "name": "Audio Trigger In", "type": "trigger"},
                     {"id": "trigger_2", "name": "Chat Trigger In", "type": "trigger"},
                     {"id": "trigger_3", "name": "OCR Trigger In", "type": "trigger"},
+                    {"id": "trigger_4", "name": "Vision Trigger In", "type": "trigger"},
                 ],
                 "outputs": [
                     {"id": "clip_trigger", "name": "Clip Trigger Out", "type": "trigger"},
@@ -193,6 +214,8 @@ class GraphDAGManager:
             {"id": "w7", "from": "node_ocr:ocr_trigger", "to": "node_gate:trigger_3", "type": "trigger"},
             {"id": "w8", "from": "node_gate:clip_trigger", "to": "node_slicer:trigger_in", "type": "trigger"},
             {"id": "w9", "from": "node_slicer:candidate_slice", "to": "node_render:candidate_in", "type": "video"},
+            {"id": "w10", "from": "node_stream:video", "to": "node_cv:video_in", "type": "video"},
+            {"id": "w11", "from": "node_cv:spike_trigger", "to": "node_gate:trigger_4", "type": "trigger"},
         ]
         self.last_sync_time = time.time()
 
@@ -351,6 +374,21 @@ class GraphDAGManager:
                     float(roi.get("h", 0.12)),
                 )
 
+        # 3b. Update CV Transformer settings
+        cv_node = next((n for n in self.nodes.values() if n["type"] == "CVTransformerNode"), None)
+        if cv_node and getattr(session, "cv_service", None):
+            props = cv_node.get("properties", {})
+            if "candidate_labels" in props:
+                raw_labels = props["candidate_labels"]
+                labels_list = [l.strip() for l in raw_labels.split(",") if l.strip()] if isinstance(raw_labels, str) else raw_labels
+                session.cv_service.set_candidate_labels(labels_list)
+            if "confidence_threshold" in props:
+                session.cv_service.set_confidence_threshold(float(props["confidence_threshold"]))
+            if "trigger_labels" in props:
+                raw_trigs = props["trigger_labels"]
+                trigs_list = [l.strip() for l in raw_trigs.split(",") if l.strip()] if isinstance(raw_trigs, str) else raw_trigs
+                session.cv_service.set_trigger_labels(trigs_list)
+
         # 4. Update Gate Evaluator settings
         gate_node = next((n for n in self.nodes.values() if n["type"] == "GateEvaluatorNode"), None)
         if gate_node and session.gate_evaluator:
@@ -410,6 +448,16 @@ class GraphDAGManager:
                     "multiplier": extra.get("ocr_multiplier", "1.0x"),
                     "balance": extra.get("ocr_balance", "$0.00"),
                     "pnl_delta": extra.get("ocr_pnl_delta", 0.0),
+                }
+            elif n["type"] == "CVTransformerNode":
+                payload[n["id"]] = {
+                    "top_label": extra.get("cv_top_label", "standby"),
+                    "confidence": extra.get("cv_confidence", 0.0),
+                    "probabilities": extra.get("cv_probabilities", {}),
+                    "detections": extra.get("cv_boxes", []),
+                    "latency_ms": extra.get("cv_latency_ms", 0.0),
+                    "thumbnail_b64": extra.get("cv_thumbnail_b64", ""),
+                    "engine": getattr(session.cv_service.engine, "engine_name", "coreml") if getattr(session, "cv_service", None) else "coreml",
                 }
             elif n["type"] == "GateEvaluatorNode":
                 debounce_sec = getattr(session.gate_evaluator, "debounce_seconds", 30.0) if session.gate_evaluator else 30.0

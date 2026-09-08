@@ -6,7 +6,7 @@
   <title>Autonomous Stream Clipper - Multi-Session HUD</title>
   <script src="/hls.min.js"></script>
   <script src="https://player.twitch.tv/js/embed/v1.js"></script>
-  <link rel="stylesheet" href="/static/graph.css" />
+  <link rel="stylesheet" href="/static/graph.css?v=2.2" />
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -1774,6 +1774,14 @@
       <div class="add-group">
         <input id="channel-input" type="text" placeholder="Add channel or Twitch URL (e.g. zarbex or twitch.tv/zarbex)" onkeydown="if(event.key==='Enter') addStreamSession();" />
         <button class="btn-add" onclick="addStreamSession()">+ Add Stream</button>
+        <button id="btn-discover-watchers" class="btn-discover-watchers" onclick="openWatchPartyModal()" title="Radar search for streamers watching or reacting to this channel">
+          <span id="watchers-btn-icon">📡</span>
+          <span id="watchers-btn-text">Watch-Party Radar</span>
+        </button>
+        <button id="btn-audio-toggle" class="btn-audio-toggle active" onclick="toggleStreamAudio()" title="Toggle Stream Audio (Unmute / Mute)">
+          <span id="top-audio-icon">🔊</span>
+          <span id="top-audio-text">Audio: ON</span>
+        </button>
         <button id="btn-theater-toggle" class="btn-theater-toggle" onclick="toggleTheaterMode()" title="Toggle Full Stream / HUD View">
           <span id="theater-icon">⛶</span>
           <span id="theater-text">Full Stream</span>
@@ -1781,6 +1789,10 @@
         <button id="btn-source-toggle" class="btn-source-toggle" onclick="toggleStreamSource()" title="Switch Stream Player Source (Direct Stream Feed vs. Twitch Embed)">
           <span id="source-icon">📺</span>
           <span id="source-text">Source: Direct</span>
+        </button>
+        <button id="btn-summarize-screen" class="btn-summarize-screen" onclick="triggerScreenSummary()" title="Capture current frame & chat to summarize screen state">
+          <span id="summarize-btn-icon">📸</span>
+          <span id="summarize-btn-text">Summarize Screen</span>
         </button>
       </div>
     </div>
@@ -3619,6 +3631,6 @@
       }
     }
   </script>
-  <script src="/static/graph.js"></script>
+  <script src="/static/graph.js?v=2.2"></script>
 </body>
 </html>

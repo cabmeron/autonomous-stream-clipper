@@ -32,6 +32,8 @@ class GateEvaluator:
         win_multiplier: float,
         pnl_delta: float,
         audio_delta: float,
+        cv_score: float = 0.0,
+        cv_label: str = "",
     ) -> int:
         """Computes a heuristic excitement score from 1 to 10."""
         score = 0
@@ -58,6 +60,18 @@ class GateEvaluator:
         elif audio_delta >= 8.0:
             score += 2
 
+        # Computer Vision Transformer excitement boost
+        cv_label_lower = cv_label.lower() if cv_label else ""
+        exciting_cv_events = {"victory", "victory celebration", "jackpot", "jackpot win", "celebration", "clutch", "epic moment"}
+        is_exciting_event = any(ev in cv_label_lower for ev in exciting_cv_events)
+
+        if cv_score >= 0.85 or (is_exciting_event and cv_score >= 0.65):
+            score += 5
+        elif cv_score >= 0.70 or (is_exciting_event and cv_score >= 0.50):
+            score += 4
+        elif cv_score >= 0.50:
+            score += 2
+
         return min(10, max(1, score))
 
     def evaluate_signals(
@@ -69,6 +83,8 @@ class GateEvaluator:
         pnl_delta: float = 0.0,
         audio_db: float = -60.0,
         audio_delta: float = 0.0,
+        cv_score: float = 0.0,
+        cv_label: str = "",
     ):
         """Evaluates incoming signal, enforces 90s debounce cooldown, and schedules post-delay dispatch."""
         now = time.time()
@@ -82,7 +98,7 @@ class GateEvaluator:
             )
             return
 
-        score = self.calculate_score(chat_instant, chat_ratio, win_multiplier, pnl_delta, audio_delta)
+        score = self.calculate_score(chat_instant, chat_ratio, win_multiplier, pnl_delta, audio_delta, cv_score=cv_score, cv_label=cv_label)
         if score < 4:
             logger.debug("[Gate] Score %d is below threshold (4); skipping trigger.", score)
             return
@@ -106,6 +122,8 @@ class GateEvaluator:
             "pnl_delta": pnl_delta,
             "audio_db": audio_db,
             "audio_delta": audio_delta,
+            "cv_score": cv_score,
+            "cv_label": cv_label,
         }
 
         # Immediately notify listener that a clipping job has activated

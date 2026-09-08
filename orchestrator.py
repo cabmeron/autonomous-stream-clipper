@@ -15,6 +15,7 @@ from services.ingest.stream_buffer import StreamRingBuffer, clean_channel_name
 from services.ingest.twitch_irc import TwitchChatVelocityEngine
 from services.heuristics.audio_monitor import AudioDecibelMonitor
 from services.heuristics.ocr_engine import BoundedRegionOCR
+from services.heuristics.cv_transformer import CVTransformerService
 from services.heuristics.gate_evaluator import GateEvaluator
 from services.heuristics.chat_descriptor import LocalChatDescriptorService
 from services.heuristics.screen_summarizer import ScreenStateSummarizerService
@@ -41,6 +42,7 @@ POST_DELAY_SEC = float(os.getenv("POST_EVENT_DELAY_SECONDS", "10"))
 HTTP_PORT = int(os.getenv("HTTP_PORT", "8000"))
 STORAGE_DIR = os.getenv("STORAGE_DIR", "./storage/clips")
 ENABLE_OCR = os.getenv("OCR_ENABLED", "true").lower() == "true"
+ENABLE_CV = os.getenv("CV_ENABLED", "true").lower() == "true"
 ENABLE_BURN_IN_SUBS = os.getenv("ENABLE_BURN_IN_SUBS", "false").lower() == "true"
 DESCRIPTOR_INTERVAL_SEC = int(os.getenv("CHAT_DESCRIPTOR_INTERVAL_SECONDS", "60"))
 LOCAL_LLM_URL = os.getenv("LOCAL_LLM_URL", "http://localhost:11434/v1")
@@ -86,6 +88,11 @@ class StreamSession:
             on_trigger_callback=self._on_ocr_trigger,
         )
 
+        # 4b. Computer Vision Transformer Engine (Zero-Shot & Object Detection)
+        self.cv_service = CVTransformerService(
+            on_trigger_callback=self._on_cv_trigger,
+        )
+
         # 5. Gate Evaluator
         self.gate_evaluator = GateEvaluator(
             on_trigger_dispatch=self._on_clip_trigger,
@@ -121,6 +128,12 @@ class StreamSession:
             "ocr_balance": "$0.00",
             "ocr_multiplier": "1.0x",
             "ocr_pnl_delta": 0.0,
+            "cv_top_label": "standby",
+            "cv_confidence": 0.0,
+            "cv_probabilities": {},
+            "cv_boxes": [],
+            "cv_latency_ms": 0.0,
+            "cv_thumbnail_b64": "",
         }
         self.last_analyzed_segment: Optional[str] = None
 
@@ -144,6 +157,7 @@ class StreamSession:
 
     def _on_chat_spike(self, instant: float, ratio: float):
         logger.info("[Session:%s][ChatSpike] instant=%.2f msgs/s, ratio=%.2fx", self.channel, instant, ratio)
+        cv_res = getattr(self.cv_service, "latest_result", None) or {}
         self.gate_evaluator.evaluate_signals(
             source="chat_spike",
             chat_instant=instant,
@@ -152,10 +166,13 @@ class StreamSession:
             pnl_delta=self.ocr_engine.pnl_delta,
             audio_db=self.audio_monitor.current_db,
             audio_delta=self.audio_monitor.delta_db,
+            cv_score=cv_res.get("confidence", 0.0),
+            cv_label=cv_res.get("top_label", ""),
         )
 
     def _on_audio_spike(self, instant_db: float, delta_db: float):
         logger.info("[Session:%s][AudioSpike] level=%.1f dB, jump=+%.1f dB", self.channel, instant_db, delta_db)
+        cv_res = getattr(self.cv_service, "latest_result", None) or {}
         self.gate_evaluator.evaluate_signals(
             source="audio_spike",
             chat_instant=self.chat_engine.v_instant,
@@ -164,10 +181,13 @@ class StreamSession:
             pnl_delta=self.ocr_engine.pnl_delta,
             audio_db=instant_db,
             audio_delta=delta_db,
+            cv_score=cv_res.get("confidence", 0.0),
+            cv_label=cv_res.get("top_label", ""),
         )
 
     def _on_ocr_trigger(self, multiplier: float, delta: float):
         logger.info("[Session:%s][OCRTrigger] multiplier=%.1fx, delta=$%.2f", self.channel, multiplier, delta)
+        cv_res = getattr(self.cv_service, "latest_result", None) or {}
         self.gate_evaluator.evaluate_signals(
             source="ocr_multiplier",
             chat_instant=self.chat_engine.v_instant,
@@ -176,6 +196,24 @@ class StreamSession:
             pnl_delta=delta,
             audio_db=self.audio_monitor.current_db,
             audio_delta=self.audio_monitor.delta_db,
+            cv_score=cv_res.get("confidence", 0.0),
+            cv_label=cv_res.get("top_label", ""),
+        )
+
+    def _on_cv_trigger(self, result: dict):
+        top_label = result.get("top_label", "")
+        conf = result.get("confidence", 0.0)
+        logger.info("[Session:%s][CVTrigger] label=%s (%.1f%%)", self.channel, top_label, conf * 100)
+        self.gate_evaluator.evaluate_signals(
+            source=f"cv_{top_label}",
+            chat_instant=self.chat_engine.v_instant if self.chat_engine else 0.0,
+            chat_ratio=self.chat_engine.spike_ratio if self.chat_engine else 1.0,
+            win_multiplier=self.ocr_engine.current_multiplier if self.ocr_engine else 1.0,
+            pnl_delta=self.ocr_engine.pnl_delta if self.ocr_engine else 0.0,
+            audio_db=self.audio_monitor.current_db if self.audio_monitor else -60.0,
+            audio_delta=self.audio_monitor.delta_db if self.audio_monitor else 0.0,
+            cv_score=conf,
+            cv_label=top_label,
         )
 
     def _on_trigger_activated(self, context: dict):
@@ -524,7 +562,18 @@ class StreamClipperOrchestrator:
                                 session.extra_telemetry["ocr_multiplier"] = f"{ocr_res['multiplier']:.1f}x"
                                 session.extra_telemetry["ocr_pnl_delta"] = ocr_res["pnl_delta"]
 
-                    # 3. Chat State Description (every X seconds)
+                        # 3. Analyze Computer Vision Transformer (Zero-Shot & Object Detection)
+                        if ENABLE_CV and getattr(session, "cv_service", None):
+                            cv_res = await asyncio.to_thread(session.cv_service.process_segment, latest_seg)
+                            if cv_res:
+                                session.extra_telemetry["cv_top_label"] = cv_res["top_label"]
+                                session.extra_telemetry["cv_confidence"] = cv_res["confidence"]
+                                session.extra_telemetry["cv_probabilities"] = cv_res["probabilities"]
+                                session.extra_telemetry["cv_boxes"] = cv_res["detections"]
+                                session.extra_telemetry["cv_latency_ms"] = cv_res["latency_ms"]
+                                session.extra_telemetry["cv_thumbnail_b64"] = cv_res["thumbnail_b64"]
+
+                    # 4. Chat State Description (every X seconds)
                     if session.chat_engine and session.chat_descriptor_service.enabled:
                         now = time.time()
                         if now - session.last_descriptor_time >= session.chat_descriptor_service.interval_seconds:
@@ -733,7 +782,16 @@ class StreamClipperOrchestrator:
         os.makedirs(clips_dir, exist_ok=True)
         os.makedirs(static_dir, exist_ok=True)
 
-        app = web.Application(middlewares=[cors_middleware])
+        @web.middleware
+        async def no_cache_middleware(request, handler):
+            resp = await handler(request)
+            if request.path.startswith("/static") or request.path.endswith(".html") or request.path == "/":
+                resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+                resp.headers["Pragma"] = "no-cache"
+                resp.headers["Expires"] = "0"
+            return resp
+
+        app = web.Application(middlewares=[cors_middleware, no_cache_middleware])
 
         async def index_handler(request):
             return web.FileResponse(os.path.join(static_dir, "index.html"))

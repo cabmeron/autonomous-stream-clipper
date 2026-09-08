@@ -40,6 +40,7 @@
         { type: "AudioMonitorNode", category: "audio", title: "Audio Decibel Monitor", icon: "🔊", desc: "RMS dB jump & volume spikes" },
         { type: "ChatVelocityNode", category: "chat", title: "Chat Velocity Engine", icon: "💬", desc: "Messages/sec & spike ratio" },
         { type: "OCRVisionNode", category: "ocr", title: "OCR / Vision Engine", icon: "🔍", desc: "Multiplier & slot balance detection" },
+        { type: "CVTransformerNode", category: "cv", title: "HuggingFace Vision", icon: "👁️", desc: "Zero-shot classification & detection" },
         { type: "ScreenSummarizerNode", category: "summarizer", title: "AI Screen Summarizer", icon: "🤖", desc: "Multimodal frame vision + chat" },
         { type: "GateEvaluatorNode", category: "gate", title: "Gate Evaluator & Logic", icon: "⚡", desc: "Weighted scoring & debounce" },
         { type: "SegmentSlicerNode", category: "slicer", title: "Rolling Segment Slicer", icon: "✂️", desc: "60s zero-copy extraction" },
@@ -658,6 +659,47 @@
           </div>
         `;
         bodyEl.appendChild(widget);
+      } else if (node.type === "CVTransformerNode") {
+        const widget = document.createElement("div");
+        widget.setAttribute("class", "node-widget");
+        const currentLabels = props.candidate_labels || "gameplay action, victory celebration, defeat game over, in-game menu, streamer facecam, brb waiting screen";
+        const thresh = props.confidence_threshold !== undefined ? props.confidence_threshold : 0.70;
+        widget.innerHTML = `
+          <div class="widget-label">
+            <span id="cv-engine-badge-${node.id}">⚡ CoreML / ANE</span>
+            <span class="widget-val" id="cv-top-val-${node.id}">STANDBY</span>
+          </div>
+          <div class="cv-preview-frame">
+            <img id="cv-thumb-${node.id}" class="cv-thumb-img" alt="CV Frame Preview" style="display:none;" />
+            <div id="cv-thumb-placeholder-${node.id}" class="cv-thumb-placeholder">Live Screen Frame & Bounding Boxes</div>
+          </div>
+          <div class="cv-bars-box" id="cv-bars-${node.id}">
+            <div class="cv-prob-row"><span class="cv-prob-label">gameplay action</span><div class="cv-prob-track"><div class="cv-prob-fill" style="width: 65%;"></div></div><span class="cv-prob-pct">65%</span></div>
+            <div class="cv-prob-row"><span class="cv-prob-label">victory celebration</span><div class="cv-prob-track"><div class="cv-prob-fill" style="width: 25%;"></div></div><span class="cv-prob-pct">25%</span></div>
+            <div class="cv-prob-row"><span class="cv-prob-label">streamer facecam</span><div class="cv-prob-track"><div class="cv-prob-fill" style="width: 5%;"></div></div><span class="cv-prob-pct">5%</span></div>
+          </div>
+          <div style="display:flex; justify-content:space-between; font-size:9px; color:#94a3b8; margin-top:4px;">
+            <span id="cv-thresh-label-${node.id}">Trigger Cutoff: ≥ ${(thresh * 100).toFixed(0)}%</span>
+            <span id="cv-latency-tag-${node.id}" style="color:#38bdf8;">-- ms</span>
+          </div>
+          <input type="range" class="node-slider" min="0.30" max="0.95" step="0.05" value="${thresh}" />
+          <div style="margin-top:6px;">
+            <div style="font-size:9px; color:#94a3b8; margin-bottom:2px;">Prompt Classes (comma-separated):</div>
+            <input type="text" class="node-input-text cv-labels-input" value="${currentLabels}" style="width: 100%; box-sizing: border-box; background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.15); border-radius: 4px; color: #f8fafc; font-size: 10px; padding: 4px 6px;" />
+          </div>
+        `;
+        const slider = widget.querySelector(".node-slider");
+        slider.addEventListener("input", (e) => {
+          props.confidence_threshold = parseFloat(e.target.value);
+          widget.querySelector(`#cv-thresh-label-${node.id}`).textContent = `Trigger Cutoff: ≥ ${(props.confidence_threshold * 100).toFixed(0)}%`;
+          this.syncNodeParamDebounced(node.id, "confidence_threshold", props.confidence_threshold);
+        });
+        const labelsInput = widget.querySelector(".cv-labels-input");
+        labelsInput.addEventListener("change", (e) => {
+          props.candidate_labels = e.target.value;
+          this.syncNodeParamDebounced(node.id, "candidate_labels", props.candidate_labels);
+        });
+        bodyEl.appendChild(widget);
       } else if (node.type === "GateEvaluatorNode") {
         const widget = document.createElement("div");
         widget.setAttribute("class", "node-widget");
@@ -777,6 +819,40 @@
           if (valEl) {
             valEl.textContent = `${primarySession.ocr_multiplier || "1.0x"} (${primarySession.ocr_balance || "$0.00"})`;
           }
+        } else if (node.type === "CVTransformerNode") {
+          const topValEl = document.getElementById(`cv-top-val-${node.id}`);
+          const latencyTag = document.getElementById(`cv-latency-tag-${node.id}`);
+          const thumbImg = document.getElementById(`cv-thumb-${node.id}`);
+          const thumbPlaceholder = document.getElementById(`cv-thumb-placeholder-${node.id}`);
+          const barsBox = document.getElementById(`cv-bars-${node.id}`);
+
+          if (primarySession.cv_top_label) {
+            if (topValEl) {
+              topValEl.textContent = `${primarySession.cv_top_label.toUpperCase()} (${(primarySession.cv_confidence * 100).toFixed(0)}%)`;
+              topValEl.style.color = primarySession.cv_confidence >= 0.70 ? "#34d399" : "#38bdf8";
+            }
+            if (latencyTag && primarySession.cv_latency_ms) {
+              latencyTag.textContent = `⚡ ${primarySession.cv_latency_ms.toFixed(1)} ms`;
+            }
+            if (thumbImg && primarySession.cv_thumbnail_b64) {
+              thumbImg.src = primarySession.cv_thumbnail_b64;
+              thumbImg.style.display = "block";
+              if (thumbPlaceholder) thumbPlaceholder.style.display = "none";
+            }
+            if (barsBox && primarySession.cv_probabilities) {
+              const sorted = Object.entries(primarySession.cv_probabilities).sort((a, b) => b[1] - a[1]).slice(0, 3);
+              barsBox.innerHTML = sorted.map(([label, prob]) => `
+                <div class="cv-prob-row">
+                  <span class="cv-prob-label">${label}</span>
+                  <div class="cv-prob-track"><div class="cv-prob-fill" style="width: ${Math.round(prob * 100)}%;"></div></div>
+                  <span class="cv-prob-pct">${Math.round(prob * 100)}%</span>
+                </div>
+              `).join("");
+            }
+            if (primarySession.cv_confidence >= 0.75) {
+              this.pulseWiresFromNode(node.id);
+            }
+          }
         } else if (node.type === "GateEvaluatorNode") {
           const scoreEl = document.getElementById(`gate-score-${node.id}`);
           const statusEl = document.getElementById(`gate-status-${node.id}`);
@@ -874,7 +950,7 @@
       const search = palette?.querySelector(".spawn-search");
       if (!palette || !list) return;
 
-      const renderItems = (filterText = "") => {
+      this.renderSpawnItems = (filterText = "") => {
         list.innerHTML = "";
         const lower = filterText.toLowerCase();
 
@@ -896,10 +972,10 @@
         });
       };
 
-      renderItems();
+      this.renderSpawnItems();
 
       search?.addEventListener("input", (e) => {
-        renderItems(e.target.value);
+        this.renderSpawnItems(e.target.value);
       });
     }
 
@@ -913,6 +989,9 @@
       if (search) {
         search.value = "";
         search.focus();
+      }
+      if (typeof this.renderSpawnItems === "function") {
+        this.renderSpawnItems("");
       }
     }
 
@@ -950,6 +1029,13 @@
         outputs = [
           { id: "ocr_trigger", name: "Win Trigger", type: "trigger" },
           { id: "multiplier", name: "Multiplier", type: "scalar" },
+        ];
+      } else if (type === "CVTransformerNode") {
+        inputs = [{ id: "video_in", name: "Video In", type: "video" }];
+        outputs = [
+          { id: "spike_trigger", name: "Vision Trigger", type: "trigger" },
+          { id: "confidence", name: "Top Confidence", type: "scalar" },
+          { id: "top_label", name: "Top Class", type: "text" },
         ];
       } else if (type === "GateEvaluatorNode") {
         inputs = [
@@ -996,9 +1082,9 @@
         if (node.type === "StreamSourceNode") {
           node.position = [streamX, yCounters.col1];
           yCounters.col1 += 260;
-        } else if (["AudioMonitorNode", "ChatVelocityNode", "OCRVisionNode", "ScreenSummarizerNode"].includes(node.type)) {
+        } else if (["AudioMonitorNode", "ChatVelocityNode", "CVTransformerNode", "OCRVisionNode", "ScreenSummarizerNode"].includes(node.type)) {
           node.position = [col2X, yCounters.col2];
-          yCounters.col2 += 220;
+          yCounters.col2 += (node.type === "CVTransformerNode" ? 340 : 220);
         } else if (node.type === "GateEvaluatorNode") {
           node.position = [col3X, yCounters.col3];
           yCounters.col3 += 200;
