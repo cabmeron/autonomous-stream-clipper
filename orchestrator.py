@@ -25,6 +25,7 @@ from services.processor.boundary_ai import BoundaryOptimizer
 from services.processor.render_engine import HardwareRenderEngine
 from services.storage.local_storage import LocalStorageManager
 from services.storage.db import DatabaseRepository
+from services.orchestrator_dag import GraphDAGManager
 import telemetry_server
 
 load_dotenv()
@@ -259,9 +260,13 @@ class StreamClipperOrchestrator:
         # 3. Watch Party & Co-Stream Discovery Engine
         self.watch_party_finder = WatchPartyFinderService()
 
+        # 4. ComfyUI-Style Dynamic Graph DAG Manager
+        self.graph_manager = GraphDAGManager(orchestrator=self)
+
         # Hook telemetry providers into telemetry server
         telemetry_server.sessions_telemetry_provider = self.get_all_telemetry
         telemetry_server.active_jobs_provider = self.get_active_jobs
+        telemetry_server.node_telemetry_provider = self.graph_manager.get_node_telemetry_payload
 
     def create_job(self, channel: str, context: dict) -> str:
         """Instantiates a new tracked clipping pipeline job with real-time step progress and logs."""
@@ -1076,6 +1081,33 @@ class StreamClipperOrchestrator:
         app.router.add_get("/api/sessions/{channel}/live.m3u8", get_live_playlist_handler)
         app.router.add_get("/api/sessions/{channel}/segments/{segment}", get_live_segment_handler)
 
+        # Node Graph Studio APIs
+        async def get_graph_handler(request):
+            return web.json_response(self.graph_manager.get_graph())
+
+        async def post_graph_sync_handler(request):
+            try:
+                data = await request.json()
+                success, msg = self.graph_manager.sync_graph(data)
+                return web.json_response({"success": success, "message": msg}, status=200 if success else 400)
+            except Exception as e:
+                return web.json_response({"error": str(e)}, status=400)
+
+        async def post_graph_node_param_handler(request):
+            node_id = request.match_info["id"]
+            try:
+                data = await request.json()
+                param = data.get("param")
+                value = data.get("value")
+                success = self.graph_manager.update_node_param(node_id, param, value)
+                return web.json_response({"success": success})
+            except Exception as e:
+                return web.json_response({"error": str(e)}, status=400)
+
+        app.router.add_get("/api/graph", get_graph_handler)
+        app.router.add_post("/api/graph/sync", post_graph_sync_handler)
+        app.router.add_post("/api/graph/nodes/{id}/param", post_graph_node_param_handler)
+
         # Static mounts
         app.router.add_static("/clips", clips_dir)
         app.router.add_static("/static", static_dir)
@@ -1107,6 +1139,12 @@ class StreamClipperOrchestrator:
             session.start(self.loop)
 
         # Setup shutdown signal handlers
+        if hasattr(signal, "SIGHUP"):
+            try:
+                signal.signal(signal.SIGHUP, signal.SIG_IGN)
+            except Exception:
+                pass
+
         for sig in (signal.SIGINT, signal.SIGTERM):
             try:
                 self.loop.add_signal_handler(sig, lambda: asyncio.create_task(self.shutdown()))
