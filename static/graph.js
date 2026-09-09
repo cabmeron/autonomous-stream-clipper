@@ -37,7 +37,7 @@
 
       // Preset Templates
       this.nodeCatalog = [
-        { type: "StreamSourceNode", category: "stream", title: "Twitch Stream Source", icon: "🔴", desc: "Live HLS, PCM Audio, & IRC Chat" },
+        { type: "StreamSourceNode", category: "stream", title: "Stream Source (Twitch / Kick)", icon: "🔴", desc: "Live HLS, PCM Audio, & Chat" },
         { type: "AudioMonitorNode", category: "audio", title: "Audio Decibel Monitor", icon: "🔊", desc: "RMS dB jump & volume spikes" },
         { type: "ChatVelocityNode", category: "chat", title: "Chat Velocity Engine", icon: "💬", desc: "Messages/sec & spike ratio" },
         { type: "OCRVisionNode", category: "ocr", title: "OCR / Vision Engine", icon: "🔍", desc: "Multiplier & slot balance detection" },
@@ -533,14 +533,16 @@
         if (node.type === "StreamSourceNode") {
           node.properties = node.properties || {};
           node.properties.channel = cleanCh;
-          node.title = `Twitch Source: #${cleanCh}`;
+          const plat = (node.properties.platform || "twitch").toLowerCase();
+          const platLabel = plat === "kick" ? "Kick" : "Twitch";
+          node.title = `${platLabel} Source: #${cleanCh}`;
 
           // Update header title in DOM
           const nodeEl = document.getElementById(`node-${node.id}`);
           if (nodeEl) {
             const titleEl = nodeEl.querySelector(".node-title");
             if (titleEl) {
-              titleEl.textContent = `Twitch Source: #${cleanCh}`;
+              titleEl.textContent = `${platLabel} Source: #${cleanCh}`;
             }
             const selectEl = nodeEl.querySelector(`#channel-select-${node.id}`);
             if (selectEl) {
@@ -683,16 +685,26 @@
 
       if (node.type === "StreamSourceNode") {
         const currentChannel = (this.selectedChannel || node.properties?.channel || window.activeTab || "marlon").replace(/^#/, "").toLowerCase();
+        const currentPlatform = (node.properties?.platform || (window.latestTelemetry?.platform) || "twitch").toLowerCase();
         node.properties = node.properties || {};
         node.properties.channel = currentChannel;
-        node.title = `Twitch Source: #${currentChannel}`;
+        node.properties.platform = currentPlatform;
+        const platLabel = currentPlatform === "kick" ? "Kick" : "Twitch";
+        node.title = `${platLabel} Source: #${currentChannel}`;
 
         const widget = document.createElement("div");
         widget.setAttribute("class", "node-widget");
         widget.innerHTML = `
           <div class="widget-label">
-            <span>Twitch Live Stream</span>
+            <span id="platform-label-${node.id}">${currentPlatform === "kick" ? "🟢 Kick Live Stream" : "🟣 Twitch Live Stream"}</span>
             <span class="widget-val" id="stream-status-${node.id}">CONNECTING</span>
+          </div>
+          <div class="node-channel-row" style="margin-bottom: 6px; display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+            <span style="font-size: 11px; color: #94a3b8; white-space: nowrap;">Platform:</span>
+            <select class="node-platform-select" id="platform-select-${node.id}" style="background: rgba(0,0,0,0.5); border: 1px solid rgba(56, 189, 248, 0.3); color: #38bdf8; font-weight: 800; font-size: 11px; padding: 2px 6px; border-radius: 6px; cursor: pointer;">
+              <option value="twitch" ${currentPlatform === "twitch" ? "selected" : ""}>🟣 Twitch</option>
+              <option value="kick" ${currentPlatform === "kick" ? "selected" : ""}>🟢 Kick</option>
+            </select>
           </div>
           <div class="node-channel-row" style="margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between; gap: 8px;">
             <span style="font-size: 11px; color: #94a3b8; white-space: nowrap;">Selected Stream:</span>
@@ -707,6 +719,22 @@
           <button class="roi-tab-btn" style="margin-top: 8px; width: 100%; text-align: center; background: rgba(56, 189, 248, 0.15); border-color: #38bdf8; color: #38bdf8; padding: 5px;" id="btn-open-calibrator-${node.id}">🎯 Calibrate ROIs Over Full Stream</button>
         `;
         bodyEl.appendChild(widget);
+
+        // Hook up platform dropdown
+        const platSelectEl = widget.querySelector(`#platform-select-${node.id}`);
+        if (platSelectEl) {
+          platSelectEl.addEventListener("change", (e) => {
+            const newPlat = e.target.value;
+            node.properties.platform = newPlat;
+            const newTitle = `${newPlat === "kick" ? "Kick" : "Twitch"} Source: #${node.properties.channel}`;
+            node.title = newTitle;
+            const titleEl = document.getElementById(`node-${node.id}`)?.querySelector(".node-title");
+            if (titleEl) titleEl.textContent = newTitle;
+            const platLabelEl = widget.querySelector(`#platform-label-${node.id}`);
+            if (platLabelEl) platLabelEl.textContent = newPlat === "kick" ? "🟢 Kick Live Stream" : "🟣 Twitch Live Stream";
+            this.syncNodeParamDebounced(node.id, "platform", newPlat);
+          });
+        }
 
         // Populate and hook up select dropdown
         const selectEl = widget.querySelector(`#channel-select-${node.id}`);
@@ -777,6 +805,15 @@
             <span>Interactive ROI Crop Box</span>
             <span class="widget-val" id="ocr-val-${node.id}">1.0x Multiplier</span>
           </div>
+          <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px; margin-top:2px;">
+            <span style="font-size:9px; color:#94a3b8; font-weight:700;">PRESET:</span>
+            <div style="display:flex; gap:3px;">
+              <button class="slot-preset-btn-mini" data-preset="pragmatic_play" style="font-size:9px; padding:2px 5px; border-radius:4px; border:1px solid rgba(255,255,255,0.1); background:rgba(255,255,255,0.05); color:#cbd5e1; cursor:pointer;">Pragmatic</button>
+              <button class="slot-preset-btn-mini" data-preset="hacksaw_gaming" style="font-size:9px; padding:2px 5px; border-radius:4px; border:1px solid rgba(255,255,255,0.1); background:rgba(255,255,255,0.05); color:#cbd5e1; cursor:pointer;">Hacksaw</button>
+              <button class="slot-preset-btn-mini" data-preset="nolimit_city" style="font-size:9px; padding:2px 5px; border-radius:4px; border:1px solid rgba(255,255,255,0.1); background:rgba(255,255,255,0.05); color:#cbd5e1; cursor:pointer;">Nolimit</button>
+              <button class="slot-preset-btn-mini" data-preset="default_slots" style="font-size:9px; padding:2px 5px; border-radius:4px; border:1px solid rgba(255,255,255,0.1); background:rgba(255,255,255,0.05); color:#cbd5e1; cursor:pointer;">Stake</button>
+            </div>
+          </div>
           <div class="node-roi-container roi-container-${node.id}">
             <img class="roi-live-img" id="ocr-live-img-${node.id}" style="display:none;" />
             <div class="roi-placeholder-text" id="ocr-placeholder-${node.id}">Live Screen Frame (Drag Box to Select Area)</div>
@@ -786,6 +823,7 @@
             <span id="ocr-status-${node.id}" style="color:#10b981;">MONITORING</span>
           </div>
           <input type="range" class="node-slider" min="10" max="500" step="10" value="${props.multiplier_threshold || 100}" />
+          <div class="ocr-node-list" id="ocr-node-list-${node.id}" style="margin-top:6px; display:flex; flex-direction:column; gap:4px; max-height:140px; overflow-y:auto;"></div>
         `;
         const slider = widget.querySelector(".node-slider");
         slider.addEventListener("input", (e) => {
@@ -793,6 +831,27 @@
           widget.querySelector("span:nth-child(1)").textContent = `Win Threshold: ≥ ${props.multiplier_threshold}x`;
           this.syncNodeParamDebounced(node.id, "multiplier_threshold", props.multiplier_threshold);
         });
+
+        widget.querySelectorAll(".slot-preset-btn-mini").forEach(btn => {
+          btn.addEventListener("click", (e) => {
+            const preset = btn.getAttribute("data-preset");
+            props.slot_preset = preset;
+            this.syncNodeParamDebounced(node.id, "slot_preset", preset);
+            if (window.applySlotPreset) {
+              window.applySlotPreset(preset);
+            }
+            widget.querySelectorAll(".slot-preset-btn-mini").forEach(b => {
+              b.style.background = "rgba(255,255,255,0.05)";
+              b.style.color = "#cbd5e1";
+              b.style.borderColor = "rgba(255,255,255,0.1)";
+            });
+            btn.style.background = "#53fc18";
+            btn.style.color = "#000";
+            btn.style.borderColor = "#53fc18";
+            this.showToast(`Applied ${preset} layout`);
+          });
+        });
+
         bodyEl.appendChild(widget);
 
         // Mount interactive draggable ROI box
@@ -1170,8 +1229,19 @@
           }
         } else if (node.type === "OCRVisionNode") {
           const valEl = document.getElementById(`ocr-val-${node.id}`);
+          const statusEl = document.getElementById(`ocr-status-${node.id}`);
+          const slotMetrics = primarySession.slot_metrics || {};
           if (valEl) {
-            valEl.textContent = `${primarySession.ocr_multiplier || "1.0x"} (${primarySession.ocr_balance || "$0.00"})`;
+            const mult = slotMetrics.multiplier || (primarySession.ocr_multiplier ? parseFloat(primarySession.ocr_multiplier) : 1.0);
+            const tier = slotMetrics.win_tier || "BASE";
+            const pnl = slotMetrics.net_pnl !== undefined
+              ? (slotMetrics.net_pnl >= 0 ? `+$${slotMetrics.net_pnl.toFixed(2)}` : `-$${Math.abs(slotMetrics.net_pnl).toFixed(2)}`)
+              : (primarySession.ocr_balance || "$0.00");
+            valEl.textContent = `${typeof mult === 'number' ? mult.toFixed(1) : mult}x (${pnl})`;
+            if (tier !== "BASE" && statusEl) {
+              statusEl.textContent = tier.replace("_", " ");
+              statusEl.style.color = slotMetrics.is_big_win ? "#fbbf24" : "#10b981";
+            }
           }
           const ocrImg = document.getElementById(`ocr-live-img-${node.id}`);
           const ocrPlaceholder = document.getElementById(`ocr-placeholder-${node.id}`);
@@ -1180,6 +1250,16 @@
             ocrImg.src = frameB64;
             ocrImg.style.display = "block";
             if (ocrPlaceholder) ocrPlaceholder.style.display = "none";
+          }
+          const listEl = document.getElementById(`ocr-node-list-${node.id}`);
+          const extracted = primarySession.ocr_extracted_areas || primarySession.dynamic_ocr_areas || [];
+          if (listEl && extracted.length > 0) {
+            listEl.innerHTML = extracted.map(a => `
+              <div style="display:flex; justify-content:space-between; align-items:center; background:rgba(255,255,255,0.04); border-left:3px solid ${a.color || '#38bdf8'}; border-radius:4px; padding:3px 6px; font-size:10px;">
+                <span style="color:#cbd5e1; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:90px;">${a.label || 'Area'}</span>
+                <span style="color:${a.color || '#38bdf8'}; font-family:monospace; font-weight:700; max-width:110px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${a.text || '—'}</span>
+              </div>
+            `).join("");
           }
         } else if (node.type === "FacecamEmotionNode") {
           const faceImg = document.getElementById(`face-live-img-${node.id}`);

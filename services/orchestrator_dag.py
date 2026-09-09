@@ -60,6 +60,7 @@ class GraphDAGManager:
                 "position": [60, 160],
                 "properties": {
                     "channel": channel,
+                    "platform": "twitch",
                     "simulate": simulate,
                 },
                 "inputs": [],
@@ -318,13 +319,21 @@ class GraphDAGManager:
         if "properties" not in node:
             node["properties"] = {}
         node["properties"][param] = value
-        if node.get("type") == "StreamSourceNode" and param == "channel":
-            node["title"] = f"Twitch Source: #{value}"
+        if node.get("type") == "StreamSourceNode":
+            if param in ("channel", "platform"):
+                ch = node["properties"].get("channel", "marlon")
+                plat = str(node["properties"].get("platform", "twitch")).capitalize()
+                node["title"] = f"{plat} Source: #{ch}"
         if node.get("type") == "GamblingOCRNode" and param.startswith("roi_"):
             rkey = param.replace("roi_", "")
             if "rois" not in node["properties"] or not isinstance(node["properties"]["rois"], dict):
                 node["properties"]["rois"] = {}
             node["properties"]["rois"][rkey] = value
+        if node.get("type") == "OCRVisionNode" and param == "slot_preset":
+            channel = self.nodes.get("node_stream", {}).get("properties", {}).get("channel")
+            session = self.orchestrator.sessions.get(channel) if (self.orchestrator and channel) else None
+            if session and getattr(session, "dynamic_ocr", None):
+                session.dynamic_ocr.apply_slot_preset(str(value))
 
         # Hot-reload into orchestrator
         self._apply_graph_to_orchestrator()
@@ -366,18 +375,22 @@ class GraphDAGManager:
 
         # 3. Update OCR settings
         ocr_node = next((n for n in self.nodes.values() if n["type"] == "OCRVisionNode"), None)
-        if ocr_node and session.ocr_engine:
+        if ocr_node:
             props = ocr_node.get("properties", {})
-            if "multiplier_threshold" in props:
-                session.ocr_engine.win_multiplier_threshold = float(props["multiplier_threshold"])
-            if "roi" in props and isinstance(props["roi"], dict):
-                roi = props["roi"]
-                session.ocr_engine.crop_box = (
-                    float(roi.get("x", 0.70)),
-                    float(roi.get("y", 0.85)),
-                    float(roi.get("w", 0.28)),
-                    float(roi.get("h", 0.12)),
-                )
+            if session.ocr_engine:
+                if "multiplier_threshold" in props:
+                    session.ocr_engine.win_multiplier_threshold = float(props["multiplier_threshold"])
+                if "roi" in props and isinstance(props["roi"], dict):
+                    roi = props["roi"]
+                    session.ocr_engine.crop_box = (
+                        float(roi.get("x", 0.70)),
+                        float(roi.get("y", 0.85)),
+                        float(roi.get("w", 0.28)),
+                        float(roi.get("h", 0.12)),
+                    )
+            if getattr(session, "dynamic_ocr", None):
+                if "dynamic_areas" in props and isinstance(props["dynamic_areas"], (list, dict)):
+                    session.dynamic_ocr.set_areas(props["dynamic_areas"])
 
         # 3b. Update CV Transformer settings
         cv_node = next((n for n in self.nodes.values() if n["type"] == "CVTransformerNode"), None)
@@ -463,6 +476,7 @@ class GraphDAGManager:
         # Stream Source Node
         payload[stream_node["id"]] = {
             "channel": session.channel,
+            "platform": getattr(session, "platform", "twitch"),
             "status": "online" if (session.buffer and not session.buffer.is_standby) else "standby",
             "buffered_segments": session.buffer.get_segment_count() if session.buffer else 0,
             "is_buffering": session.buffer.is_alive() if session.buffer else False,
@@ -493,6 +507,9 @@ class GraphDAGManager:
                     "pnl_delta": extra.get("ocr_pnl_delta", 0.0),
                     "roi": getattr(session.ocr_engine, "roi", None),
                     "stream_frame_b64": extra.get("stream_frame_b64", ""),
+                    "ocr_extracted_areas": extra.get("ocr_extracted_areas", []),
+                    "dynamic_ocr_areas": session.dynamic_ocr.get_areas() if getattr(session, "dynamic_ocr", None) else [],
+                    "slot_metrics": extra.get("slot_metrics") or (session.dynamic_ocr.compute_slot_metrics() if getattr(session, "dynamic_ocr", None) else {}),
                 }
             elif n["type"] == "CVTransformerNode":
                 payload[n["id"]] = {

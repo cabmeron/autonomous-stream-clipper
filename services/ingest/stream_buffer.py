@@ -16,11 +16,14 @@ logger = logging.getLogger(__name__)
 
 
 def clean_channel_name(raw: str) -> str:
-    """Extracts a normalized alphanumeric Twitch channel name from raw strings, URLs, or tags.
+    """Extracts a normalized alphanumeric channel name from raw strings, URLs, or tags.
 
     Examples:
         'https://www.twitch.tv/ponden' -> 'ponden'
         'twitch.tv/ponden/'           -> 'ponden'
+        'kick.com/trainwreckstv'       -> 'trainwreckstv'
+        'https://kick.com/xqc'         -> 'xqc'
+        'kick:xqc'                     -> 'xqc'
         '#marlon'                     -> 'marlon'
         '@marlon'                     -> 'marlon'
         'zarbex'                      -> 'zarbex'
@@ -29,9 +32,16 @@ def clean_channel_name(raw: str) -> str:
         return ""
     s = str(raw).strip()
     lower_s = s.lower()
-    if "twitch.tv/" in lower_s:
+    if "kick.com/" in lower_s:
+        s = lower_s.split("kick.com/", 1)[1]
+        s = s.split("?")[0].split("#")[0].split("/")[0]
+    elif lower_s.startswith("kick:"):
+        s = lower_s.split("kick:", 1)[1]
+    elif "twitch.tv/" in lower_s:
         s = lower_s.split("twitch.tv/", 1)[1]
         s = s.split("?")[0].split("#")[0].split("/")[0]
+    elif lower_s.startswith("twitch:"):
+        s = lower_s.split("twitch:", 1)[1]
     elif lower_s.startswith("http://") or lower_s.startswith("https://"):
         try:
             p = urlparse(s)
@@ -44,6 +54,16 @@ def clean_channel_name(raw: str) -> str:
     s = s.split("?")[0].split("/")[0]
     s = re.sub(r"[^a-zA-Z0-9_]", "", s)
     return s.lower()
+
+
+def detect_channel_and_platform(raw: str, default_platform: str = "twitch") -> tuple[str, str]:
+    """Detects channel name and streaming platform from raw input string or URL."""
+    raw_str = str(raw or "").strip().lower()
+    if "kick.com/" in raw_str or raw_str.startswith("kick:"):
+        return clean_channel_name(raw), "kick"
+    if "twitch.tv/" in raw_str or raw_str.startswith("twitch:"):
+        return clean_channel_name(raw), "twitch"
+    return clean_channel_name(raw), default_platform
 
 
 def get_default_shm_dir() -> str:
@@ -89,8 +109,10 @@ class StreamRingBuffer:
         window_seconds: int = 180,
         segment_time: int = 10,
         simulate: bool = False,
+        platform: str = "twitch",
     ):
         self.channel = clean_channel_name(channel)
+        self.platform = platform.lower().strip()
         base_dir = shm_dir or get_default_shm_dir()
         self.shm_dir = os.path.join(base_dir, self.channel)
         self.window_seconds = window_seconds
@@ -137,11 +159,12 @@ class StreamRingBuffer:
         return env
 
     def _resolve_live_m3u8(self) -> Optional[str]:
-        """Queries streamlink for the direct Twitch HLS playlist URL."""
+        """Queries streamlink (and Kick API fallback) for the direct HLS playlist URL."""
         streamlink_bin = resolve_streamlink_binary()
+        target_url = f"https://kick.com/{self.channel}" if self.platform == "kick" else f"twitch.tv/{self.channel}"
         try:
             res = subprocess.run(
-                f'{streamlink_bin} --stream-url "twitch.tv/{self.channel}" best',
+                f'{streamlink_bin} --stream-url "{target_url}" best',
                 shell=True,
                 capture_output=True,
                 text=True,
@@ -151,7 +174,32 @@ class StreamRingBuffer:
             if res.returncode == 0 and res.stdout.strip().startswith("http"):
                 return res.stdout.strip()
         except Exception as e:
-            logger.debug("[Buffer:%s] Error resolving stream URL: %s", self.channel, e)
+            logger.debug("[Buffer:%s] Error resolving stream URL via streamlink: %s", self.channel, e)
+
+        # Fallback for Kick: query Kick API v2 directly
+        if self.platform == "kick":
+            try:
+                import json
+                import urllib.request
+                api_url = f"https://kick.com/api/v2/channels/{self.channel}"
+                req = urllib.request.Request(
+                    api_url,
+                    headers={
+                        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+                        "Accept": "application/json",
+                    },
+                )
+                with urllib.request.urlopen(req, timeout=4.0) as resp:
+                    if resp.status == 200:
+                        data = json.loads(resp.read().decode("utf-8"))
+                        pb_url = data.get("playback_url")
+                        livestream = data.get("livestream")
+                        if pb_url and (livestream is not None and livestream.get("is_live")):
+                            logger.info("[Buffer:%s] Resolved live Kick playback URL via API fallback", self.channel)
+                            return pb_url
+            except Exception as e:
+                logger.debug("[Buffer:%s] Error resolving Kick stream URL via API fallback: %s", self.channel, e)
+
         return None
 
     def _start_ingest_process(self):
@@ -159,6 +207,7 @@ class StreamRingBuffer:
         os.makedirs(self.shm_dir, exist_ok=True)
         out_pattern = os.path.join(self.shm_dir, "seg_%02d.ts")
         self._last_process_start_time = time.time()
+        platform_name = "Kick" if self.platform == "kick" else "Twitch"
 
         if self.simulate:
             self.is_standby = False
@@ -178,7 +227,7 @@ class StreamRingBuffer:
             if live_url:
                 self.is_standby = False
                 self.current_offline_interval = self.min_offline_check_interval
-                logger.info("[Buffer:%s] Live Twitch broadcast detected! Ingesting direct HLS stream...", self.channel)
+                logger.info("[Buffer:%s] Live %s broadcast detected! Ingesting direct HLS stream...", self.channel, platform_name)
                 cmd = (
                     f'ffmpeg -hide_banner -loglevel error '
                     f'-reconnect 1 -reconnect_at_eof 1 -reconnect_streamed 1 -reconnect_delay_max 5 '
@@ -191,8 +240,9 @@ class StreamRingBuffer:
                 self.current_offline_interval = self.min_offline_check_interval
                 self._next_live_check_time = time.time() + self.current_offline_interval
                 logger.info(
-                    "[Buffer:%s] Channel is currently OFFLINE on Twitch. Running standby feed until stream goes live (first check in %.1fs)...",
+                    "[Buffer:%s] Channel is currently OFFLINE on %s. Running standby feed until stream goes live (first check in %.1fs)...",
                     self.channel,
+                    platform_name,
                     self.current_offline_interval,
                 )
                 cmd = (

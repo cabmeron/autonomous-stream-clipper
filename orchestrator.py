@@ -13,10 +13,14 @@ from typing import Dict, List, Optional
 from dotenv import load_dotenv
 from aiohttp import web
 
-from services.ingest.stream_buffer import StreamRingBuffer, clean_channel_name
+from services.ingest.stream_buffer import StreamRingBuffer, clean_channel_name, detect_channel_and_platform
 from services.ingest.twitch_irc import TwitchChatVelocityEngine
+from services.ingest.kick_chat import KickChatVelocityEngine
 from services.heuristics.audio_monitor import AudioDecibelMonitor
 from services.heuristics.ocr_engine import BoundedRegionOCR
+from services.heuristics.dynamic_ocr import DynamicOCRExtractorService
+from services.heuristics.kick_slot_radar import KickSlotRadarService
+from services.heuristics.slot_presets import list_available_presets
 from services.heuristics.cv_transformer import CVTransformerService
 from services.heuristics.streamer_emotion import StreamerEmotionService
 from services.heuristics.gambling_ocr import GamblingOCREngine
@@ -57,21 +61,31 @@ LOCAL_LLM_MODEL = os.getenv("LOCAL_LLM_MODEL", "llama3.2:1b")
 class StreamSession:
     """Represents an independent monitoring session for a single Twitch channel."""
 
-    def __init__(self, channel: str, orchestrator: "StreamClipperOrchestrator", simulate: bool = False):
-        self.channel = clean_channel_name(channel)
+    def __init__(self, channel: str, orchestrator: "StreamClipperOrchestrator", simulate: bool = False, platform: Optional[str] = None):
+        detected_chan, detected_plat = detect_channel_and_platform(channel, default_platform=platform or "twitch")
+        self.channel = detected_chan
+        self.platform = (platform or detected_plat).lower()
         self.orchestrator = orchestrator
         self.simulate = simulate
 
         # 1. Video Buffer
-        self.buffer = StreamRingBuffer(self.channel, simulate=self.simulate)
+        self.buffer = StreamRingBuffer(self.channel, simulate=self.simulate, platform=self.platform)
 
-        # 2. IRC Chat Velocity Engine
-        self.chat_engine = TwitchChatVelocityEngine(
-            self.channel,
-            on_spike_callback=self._on_chat_spike,
-            spike_ratio_threshold=float(os.getenv("HEURISTIC_CHAT_RATIO_THRESHOLD", "3.0")),
-            instant_min_threshold=float(os.getenv("HEURISTIC_CHAT_INSTANT_MIN", "10.0")),
-        )
+        # 2. Chat Velocity Engine (Twitch IRC or Kick Pusher)
+        if self.platform == "kick":
+            self.chat_engine = KickChatVelocityEngine(
+                self.channel,
+                on_spike_callback=self._on_chat_spike,
+                spike_ratio_threshold=float(os.getenv("HEURISTIC_CHAT_RATIO_THRESHOLD", "3.0")),
+                instant_min_threshold=float(os.getenv("HEURISTIC_CHAT_INSTANT_MIN", "10.0")),
+            )
+        else:
+            self.chat_engine = TwitchChatVelocityEngine(
+                self.channel,
+                on_spike_callback=self._on_chat_spike,
+                spike_ratio_threshold=float(os.getenv("HEURISTIC_CHAT_RATIO_THRESHOLD", "3.0")),
+                instant_min_threshold=float(os.getenv("HEURISTIC_CHAT_INSTANT_MIN", "10.0")),
+            )
         self.chat_task: Optional[asyncio.Task] = None
 
         # 3. Audio Monitor
@@ -113,6 +127,9 @@ class StreamSession:
             on_tilt_bet=self._on_gambling_tilt_bet,
         )
 
+        # 4f. Dynamic Multi-Area OCR Extractor Service (arbitrary user-defined areas)
+        self.dynamic_ocr = DynamicOCRExtractorService()
+
         # 5. Gate Evaluator
         self.gate_evaluator = GateEvaluator(
             on_trigger_dispatch=self._on_clip_trigger,
@@ -148,6 +165,8 @@ class StreamSession:
             "ocr_balance": "$0.00",
             "ocr_multiplier": "1.0x",
             "ocr_pnl_delta": 0.0,
+            "ocr_extracted_areas": [],
+            "slot_metrics": {},
             "cv_top_label": "standby",
             "cv_confidence": 0.0,
             "cv_probabilities": {},
@@ -336,6 +355,12 @@ class StreamSession:
         }
         return {
             "channel": self.channel,
+            "platform": self.platform,
+            "playback_embed_url": (
+                f"https://player.kick.com/{self.channel}?autoplay=true&muted=true"
+                if self.platform == "kick"
+                else f"https://player.twitch.tv/?channel={self.channel}&parent=localhost&autoplay=true&muted=true"
+            ),
             "status": "monitoring",
             "v_instant": calc["v_instant"],
             "v_baseline": calc["v_baseline"],
@@ -348,6 +373,9 @@ class StreamSession:
             "ocr_balance": self.extra_telemetry["ocr_balance"],
             "ocr_multiplier": self.extra_telemetry["ocr_multiplier"],
             "ocr_pnl_delta": self.extra_telemetry["ocr_pnl_delta"],
+            "ocr_extracted_areas": self.extra_telemetry.get("ocr_extracted_areas", []),
+            "dynamic_ocr_areas": self.dynamic_ocr.get_areas() if getattr(self, "dynamic_ocr", None) else [],
+            "slot_metrics": self.extra_telemetry.get("slot_metrics") or (self.dynamic_ocr.compute_slot_metrics() if getattr(self, "dynamic_ocr", None) else {}),
             "cv_top_label": self.extra_telemetry.get("cv_top_label", "standby"),
             "cv_confidence": self.extra_telemetry.get("cv_confidence", 0.0),
             "cv_probabilities": self.extra_telemetry.get("cv_probabilities", {}),
@@ -415,6 +443,9 @@ class StreamClipperOrchestrator:
 
         # 3. Watch Party & Co-Stream Discovery Engine
         self.watch_party_finder = WatchPartyFinderService()
+
+        # 3b. Kick.com Slots & Casino Live Stream Radar Engine
+        self.kick_slot_radar = KickSlotRadarService()
 
         # 4. ComfyUI-Style Dynamic Graph DAG Manager
         self.graph_manager = GraphDAGManager(orchestrator=self)
@@ -557,21 +588,22 @@ class StreamClipperOrchestrator:
         """Returns summary status for all active sessions."""
         return [sess.get_status() for sess in self.sessions.values()]
 
-    async def add_session(self, channel: str, simulate: bool = False) -> dict:
+    async def add_session(self, channel: str, simulate: bool = False, platform: Optional[str] = None) -> dict:
         """Adds a new channel session and begins ingestion."""
-        clean = clean_channel_name(channel)
+        clean, detected_plat = detect_channel_and_platform(channel, default_platform=platform or "twitch")
+        plat = (platform or detected_plat).lower()
         if not clean:
-            raise ValueError("Channel name or Twitch URL cannot be empty or invalid")
+            raise ValueError("Channel name or stream URL cannot be empty or invalid")
 
         if clean in self.sessions:
-            logger.info("[Orchestrator] Channel #%s already active", clean)
+            logger.info("[Orchestrator] Channel #%s (%s) already active", clean, self.sessions[clean].platform)
             return self.sessions[clean].get_status()
 
         # Auto-detect simulation channel from naming patterns or explicit simulate flag
         if simulate or clean.startswith("sim_") or "_reacts" in clean or "watch_" in clean or "react_" in clean:
             simulate = True
 
-        session = StreamSession(clean, self, simulate=simulate)
+        session = StreamSession(clean, self, simulate=simulate, platform=plat)
         if self.running and self.loop:
             session.start(self.loop)
         self.sessions[clean] = session
@@ -611,15 +643,14 @@ class StreamClipperOrchestrator:
         first = list(self.sessions.values())[0]
         return first.get_status()
 
-    async def set_channel(self, new_channel: Optional[str]) -> dict:
+    async def set_channel(self, new_channel: Optional[str], platform: Optional[str] = None) -> dict:
         """Single-channel compatibility wrapper."""
-        clean = clean_channel_name(new_channel) if new_channel else ""
-        if not clean:
+        if not new_channel:
             for ch in list(self.sessions.keys()):
                 await self.remove_session(ch)
             return self.get_status()
         else:
-            return await self.add_session(clean)
+            return await self.add_session(new_channel, platform=platform)
 
     async def trigger_manual_clip(self, channel: str) -> dict:
         """Manually captures the newest 60 seconds from the rolling stream buffer."""
@@ -705,6 +736,29 @@ class StreamClipperOrchestrator:
             except Exception as e:
                 logger.debug("[GamblingOCR] Error processing frame: %s", e)
 
+        # 4c. Dynamic Multi-Area OCR Extractor (Extracts text & numbers from all user-defined areas)
+        if getattr(session, "dynamic_ocr", None) and frame is not None:
+            try:
+                ocr_areas_res = session.dynamic_ocr.process_frame(frame)
+                results["ocr_extracted_areas"] = ocr_areas_res
+
+                # Compute derived real-time slot intelligence (multiplier, PnL, win tier)
+                slot_metrics = session.dynamic_ocr.compute_slot_metrics()
+                results["slot_metrics"] = slot_metrics
+
+                # Trigger GateEvaluator if a Big Win (>= 50x) is detected
+                if slot_metrics.get("is_big_win") and getattr(session, "gate_evaluator", None):
+                    mult = slot_metrics.get("multiplier", 50.0)
+                    tier = slot_metrics.get("win_tier", "BIG_WIN")
+                    session.gate_evaluator.evaluate_trigger("ocr", score=8, context={
+                        "win_multiplier": mult,
+                        "win_tier": tier,
+                        "slot_pnl": slot_metrics.get("net_pnl", 0.0),
+                        "suggested_title": f"INSANE {mult:.1f}x {tier.replace('_', ' ')} on Kick Slots!",
+                    })
+            except Exception as e:
+                logger.debug("[DynamicOCR] Error processing frame: %s", e)
+
         # 5. Generate clean, compressed JPEG base64 frame thumbnail for in-node and stream ROI dragging
         thumb_b64 = ""
         if frame is not None:
@@ -783,6 +837,12 @@ class StreamClipperOrchestrator:
                                 session.extra_telemetry["gambling_win"] = g_res["win"]
                                 session.extra_telemetry["gambling_multiplier"] = g_res["multiplier"]
                                 session.extra_telemetry["gambling_spin_state"] = g_res["spin_state"]
+
+                            if heur_res.get("ocr_extracted_areas") is not None:
+                                session.extra_telemetry["ocr_extracted_areas"] = heur_res["ocr_extracted_areas"]
+
+                            if heur_res.get("slot_metrics") is not None:
+                                session.extra_telemetry["slot_metrics"] = heur_res["slot_metrics"]
 
                     # 4. Chat State Description (every X seconds)
                     if session.chat_engine and session.chat_descriptor_service.enabled:
@@ -1015,8 +1075,9 @@ class StreamClipperOrchestrator:
             try:
                 data = await request.json()
                 channel = data.get("channel", "")
+                platform = data.get("platform")
                 simulate = bool(data.get("simulate", False))
-                res = await self.add_session(channel, simulate=simulate)
+                res = await self.add_session(channel, simulate=simulate, platform=platform)
                 return web.json_response(res)
             except ValueError as ve:
                 return web.json_response({"error": str(ve)}, status=400)
@@ -1036,7 +1097,8 @@ class StreamClipperOrchestrator:
             try:
                 data = await request.json()
                 target_channel = data.get("channel", "")
-                result = await self.set_channel(target_channel)
+                platform = data.get("platform")
+                result = await self.set_channel(target_channel, platform=platform)
                 return web.json_response(result)
             except Exception as e:
                 return web.json_response({"error": str(e)}, status=400)
@@ -1272,6 +1334,116 @@ class StreamClipperOrchestrator:
         app.router.add_post("/api/sessions/{channel}/summarize-screen", post_summarize_screen_handler)
         app.router.add_post("/api/summarize-screen", post_summarize_screen_handler)
         app.router.add_get("/api/screen-summaries", get_screen_summaries_handler)
+
+        async def get_ocr_areas_handler(request):
+            channel = clean_channel_name(request.match_info.get("channel", ""))
+            if not channel or channel not in self.sessions:
+                return web.json_response({"error": "Session not found"}, status=404)
+            session = self.sessions[channel]
+            if not getattr(session, "dynamic_ocr", None):
+                return web.json_response({"areas": [], "latest_extractions": []})
+            return web.json_response({
+                "channel": channel,
+                "areas": session.dynamic_ocr.get_areas(),
+                "latest_extractions": getattr(session.dynamic_ocr, "latest_extractions", []),
+            })
+
+        async def post_ocr_areas_handler(request):
+            channel = clean_channel_name(request.match_info.get("channel", ""))
+            if not channel or channel not in self.sessions:
+                return web.json_response({"error": "Session not found"}, status=404)
+            session = self.sessions[channel]
+            if not getattr(session, "dynamic_ocr", None):
+                return web.json_response({"error": "Dynamic OCR not initialized for session"}, status=500)
+
+            try:
+                data = await request.json()
+            except Exception:
+                return web.json_response({"error": "Invalid JSON body"}, status=400)
+
+            action = data.get("action")
+            if action == "add":
+                label = data.get("label", "Area")
+                roi = data.get("roi")
+                color = data.get("color")
+                area = session.dynamic_ocr.add_area(label=label, roi=roi, color=color)
+                return web.json_response({"success": True, "action": "add", "area": area, "areas": session.dynamic_ocr.get_areas()})
+            elif action == "update_roi":
+                aid = data.get("id")
+                roi = data.get("roi", {})
+                if not aid or not isinstance(roi, dict):
+                    return web.json_response({"error": "Missing area id or roi dict"}, status=400)
+                session.dynamic_ocr.update_area_roi(
+                    aid,
+                    float(roi.get("x", 0.0)),
+                    float(roi.get("y", 0.0)),
+                    float(roi.get("w", 0.1)),
+                    float(roi.get("h", 0.1)),
+                )
+                return web.json_response({"success": True, "action": "update_roi", "areas": session.dynamic_ocr.get_areas()})
+            elif action == "update_label":
+                aid = data.get("id")
+                label = data.get("label", "")
+                if not aid:
+                    return web.json_response({"error": "Missing area id"}, status=400)
+                session.dynamic_ocr.update_area_label(aid, label)
+                return web.json_response({"success": True, "action": "update_label", "areas": session.dynamic_ocr.get_areas()})
+            elif action == "remove":
+                aid = data.get("id")
+                if not aid:
+                    return web.json_response({"error": "Missing area id"}, status=400)
+                res = session.dynamic_ocr.remove_area(aid)
+                return web.json_response({"success": res, "action": "remove", "areas": session.dynamic_ocr.get_areas()})
+            elif "areas" in data:
+                session.dynamic_ocr.set_areas(data["areas"])
+                return web.json_response({"success": True, "action": "set_areas", "areas": session.dynamic_ocr.get_areas()})
+            else:
+                return web.json_response({"error": f"Unsupported action: {action}"}, status=400)
+
+        app.router.add_get("/api/sessions/{channel}/ocr-areas", get_ocr_areas_handler)
+        app.router.add_post("/api/sessions/{channel}/ocr-areas", post_ocr_areas_handler)
+
+        # Kick Slots Live Stream Radar API
+        async def get_kick_slots_streams_handler(request):
+            force = request.query.get("refresh", "false").lower() == "true"
+            streams = await self.kick_slot_radar.discover_live_slots(force_refresh=force)
+            return web.json_response({
+                "streams": streams,
+                "count": len(streams),
+                "timestamp": time.time(),
+            })
+
+        app.router.add_get("/api/kick/slots-streams", get_kick_slots_streams_handler)
+
+        # Slot Presets API
+        async def post_slot_preset_handler(request):
+            channel = clean_channel_name(request.match_info.get("channel", ""))
+            if not channel or channel not in self.sessions:
+                return web.json_response({"error": "Session not found"}, status=404)
+            session = self.sessions[channel]
+            if not getattr(session, "dynamic_ocr", None):
+                return web.json_response({"error": "Dynamic OCR not initialized for session"}, status=500)
+            try:
+                data = await request.json()
+            except Exception:
+                return web.json_response({"error": "Invalid JSON body"}, status=400)
+
+            preset = data.get("preset", "default_slots")
+            areas = session.dynamic_ocr.apply_slot_preset(preset)
+            return web.json_response({
+                "success": True,
+                "preset": preset,
+                "areas": areas,
+                "slot_metrics": session.dynamic_ocr.compute_slot_metrics(),
+            })
+
+        async def get_slot_presets_handler(request):
+            return web.json_response({
+                "presets": list_available_presets(),
+            })
+
+        app.router.add_post("/api/sessions/{channel}/slot-preset", post_slot_preset_handler)
+        app.router.add_get("/api/slot-presets", get_slot_presets_handler)
 
         async def get_live_playlist_handler(request):
             """Generates a live HLS m3u8 playlist from active TS segments in the RAM ring buffer."""
