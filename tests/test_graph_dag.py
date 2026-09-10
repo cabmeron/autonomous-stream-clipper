@@ -109,3 +109,170 @@ def test_stream_node_channel_switch():
     assert mgr.nodes["node_stream"]["properties"]["channel"] == "zarbex"
     assert mgr.nodes["node_stream"]["title"] == "Twitch Source: #zarbex"
 
+
+def test_multi_stream_routing_and_isolation():
+    """Verify that worker nodes resolve exactly to the stream they are wired to (Twitch vs Kick)."""
+    class MockSession:
+        def __init__(self, channel, platform="twitch"):
+            self.channel = channel
+            self.platform = platform
+            self.buffer = None
+            self.chat_engine = None
+            self.audio_monitor = None
+            self.ocr_engine = None
+            self.cv_service = None
+            self.extra_telemetry = {
+                "cv_top_label": f"{channel}_label",
+                "cv_confidence": 0.88,
+                "cv_probabilities": {f"{channel}_label": 0.88},
+                "stream_frame_b64": f"data:image/jpeg;base64,{channel}_frame",
+            }
+
+    class MockOrchestrator:
+        def __init__(self):
+            self.sessions = {
+                "twitch_stream": MockSession("twitch_stream", "twitch"),
+                "kick_stream": MockSession("kick_stream", "kick"),
+            }
+
+    mgr = GraphDAGManager(orchestrator=MockOrchestrator())
+
+    # Build a graph with 2 StreamSourceNodes (1 Twitch, 1 Kick) and 1 CVTransformerNode
+    nodes = {
+        "src_twitch": {
+            "id": "src_twitch",
+            "type": "StreamSourceNode",
+            "properties": {"channel": "twitch_stream", "platform": "twitch"},
+            "outputs": [{"id": "video", "type": "video"}],
+        },
+        "src_kick": {
+            "id": "src_kick",
+            "type": "StreamSourceNode",
+            "properties": {"channel": "kick_stream", "platform": "kick"},
+            "outputs": [{"id": "video", "type": "video"}],
+        },
+        "cv_node": {
+            "id": "cv_node",
+            "type": "CVTransformerNode",
+            "properties": {"channel": "auto"},
+            "inputs": [{"id": "video_in", "type": "video"}],
+            "outputs": [{"id": "spike_trigger", "type": "trigger"}],
+        },
+    }
+
+    # Case 1: Wire Kick stream to CVTransformerNode
+    wires_kick = [
+        {"id": "w1", "from": "src_kick:video", "to": "cv_node:video_in", "type": "video"}
+    ]
+    mgr.sync_graph({"nodes": list(nodes.values()), "wires": wires_kick})
+
+    resolved_session = mgr.get_node_source_session("cv_node")
+    assert resolved_session is not None
+    assert resolved_session.channel == "kick_stream"
+    assert resolved_session.platform == "kick"
+
+    telemetry = mgr.get_node_telemetry_payload()
+    assert telemetry["cv_node"]["source_channel"] == "kick_stream"
+    assert telemetry["cv_node"]["top_label"] == "kick_stream_label"
+    assert "twitch_stream" not in telemetry["cv_node"]["top_label"]
+
+    # Case 2: Switch wire to Twitch stream
+    wires_twitch = [
+        {"id": "w2", "from": "src_twitch:video", "to": "cv_node:video_in", "type": "video"}
+    ]
+    mgr.sync_graph({"nodes": list(nodes.values()), "wires": wires_twitch})
+
+    resolved_session = mgr.get_node_source_session("cv_node")
+    assert resolved_session is not None
+    assert resolved_session.channel == "twitch_stream"
+    assert resolved_session.platform == "twitch"
+
+    telemetry = mgr.get_node_telemetry_payload()
+    assert telemetry["cv_node"]["source_channel"] == "twitch_stream"
+    assert telemetry["cv_node"]["top_label"] == "twitch_stream_label"
+
+
+def test_unrouted_node_telemetry_isolation():
+    """Verify that newly spawned or unwired nodes return unrouted status and empty telemetry."""
+    class MockSession:
+        def __init__(self, channel):
+            self.channel = channel
+            self.buffer = None
+            self.chat_engine = None
+            self.extra_telemetry = {"cv_top_label": "action", "cv_confidence": 0.9}
+
+    class MockOrchestrator:
+        def __init__(self):
+            self.sessions = {"twitch_stream": MockSession("twitch_stream")}
+
+    mgr = GraphDAGManager(orchestrator=MockOrchestrator())
+
+    # Add unwired CVTransformerNode
+    nodes = {
+        "src_twitch": {
+            "id": "src_twitch",
+            "type": "StreamSourceNode",
+            "properties": {"channel": "twitch_stream"},
+            "outputs": [{"id": "video", "type": "video"}],
+        },
+        "new_cv_node": {
+            "id": "new_cv_node",
+            "type": "CVTransformerNode",
+            "properties": {"channel": "auto"},
+            "inputs": [{"id": "video_in", "type": "video"}],
+            "outputs": [{"id": "spike_trigger", "type": "trigger"}],
+        },
+    }
+    # No wires to new_cv_node
+    mgr.sync_graph({"nodes": list(nodes.values()), "wires": []})
+
+    assert mgr.get_node_source_session("new_cv_node") is None
+
+    telemetry = mgr.get_node_telemetry_payload()
+    assert telemetry["new_cv_node"]["unrouted"] is True
+    assert telemetry["new_cv_node"]["status"] == "unrouted"
+    assert "top_label" not in telemetry["new_cv_node"]
+
+
+def test_explicit_node_channel_override():
+    """Verify that manually assigning a channel on a node overrides incoming wires."""
+    class MockSession:
+        def __init__(self, channel):
+            self.channel = channel
+            self.buffer = None
+            self.chat_engine = None
+            self.extra_telemetry = {"cv_top_label": f"{channel}_metric"}
+
+    class MockOrchestrator:
+        def __init__(self):
+            self.sessions = {
+                "twitch_stream": MockSession("twitch_stream"),
+                "kick_stream": MockSession("kick_stream"),
+            }
+
+    mgr = GraphDAGManager(orchestrator=MockOrchestrator())
+
+    nodes = {
+        "src_twitch": {
+            "id": "src_twitch",
+            "type": "StreamSourceNode",
+            "properties": {"channel": "twitch_stream"},
+            "outputs": [{"id": "video", "type": "video"}],
+        },
+        "cv_node": {
+            "id": "cv_node",
+            "type": "CVTransformerNode",
+            "properties": {"channel": "kick_stream"},  # Explicit override
+            "inputs": [{"id": "video_in", "type": "video"}],
+            "outputs": [{"id": "spike_trigger", "type": "trigger"}],
+        },
+    }
+    # Wire from Twitch, but node is explicitly assigned to Kick
+    wires = [{"id": "w1", "from": "src_twitch:video", "to": "cv_node:video_in", "type": "video"}]
+    mgr.sync_graph({"nodes": list(nodes.values()), "wires": wires})
+
+    resolved = mgr.get_node_source_session("cv_node")
+    assert resolved is not None
+    assert resolved.channel == "kick_stream"
+
+

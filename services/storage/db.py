@@ -3,7 +3,7 @@ import logging
 import os
 import sqlite3
 import uuid
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -45,12 +45,27 @@ class DatabaseRepository:
                     suggested_caption TEXT,
                     transcript_json TEXT,
                     status TEXT DEFAULT 'pending_triage',
+                    folder_id TEXT,
+                    folder_name TEXT,
+                    folder_date TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
             """)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_clips_channel ON clips(channel_name);")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_clips_status ON clips(status);")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_clips_created_at ON clips(created_at DESC);")
+
+            # Dynamic migration for existing SQLite databases
+            cursor.execute("PRAGMA table_info(clips);")
+            existing_cols = {row[1] for row in cursor.fetchall()}
+            if "folder_id" not in existing_cols:
+                cursor.execute("ALTER TABLE clips ADD COLUMN folder_id TEXT;")
+            if "folder_name" not in existing_cols:
+                cursor.execute("ALTER TABLE clips ADD COLUMN folder_name TEXT;")
+            if "folder_date" not in existing_cols:
+                cursor.execute("ALTER TABLE clips ADD COLUMN folder_date TEXT;")
+
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_clips_folder ON clips(folder_id);")
 
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS chat_descriptors (
@@ -99,8 +114,9 @@ class DatabaseRepository:
                     id, channel_name, video_url, thumbnail_url, duration_seconds,
                     cut_start, cut_end, chat_velocity_peak, spike_ratio,
                     ocr_pnl_delta, ocr_multiplier, heuristic_score,
-                    suggested_title, suggested_caption, transcript_json, status
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    suggested_title, suggested_caption, transcript_json, status,
+                    folder_id, folder_name, folder_date
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 clip_id,
                 clip_data.get("channel_name", "").lower(),
@@ -118,10 +134,13 @@ class DatabaseRepository:
                 clip_data.get("suggested_caption", ""),
                 words_json,
                 clip_data.get("status", "pending_triage"),
+                clip_data.get("folder_id"),
+                clip_data.get("folder_name"),
+                clip_data.get("folder_date"),
             ))
             conn.commit()
 
-        logger.info("[Database] Clip %s persisted locally.", clip_id)
+        logger.info("[Database] Clip %s persisted locally (folder=%s).", clip_id, clip_data.get("folder_id"))
         return clip_id
 
     def get_clip(self, clip_id: str) -> Optional[Dict]:
@@ -149,18 +168,63 @@ class DatabaseRepository:
             conn.commit()
             return cursor.rowcount > 0
 
-    def get_recent_clips(self, limit: int = 50, channel: Optional[str] = None) -> List[Dict]:
-        """Retrieves recent clips, optionally filtered by channel name."""
+    def update_clip_folder(
+        self,
+        clip_id: str,
+        folder_id: Optional[str],
+        folder_name: Optional[str] = None,
+        folder_date: Optional[str] = None,
+    ) -> bool:
+        """Updates the folder association of a clip."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE clips SET folder_id = ?, folder_name = ?, folder_date = ? WHERE id = ?",
+                (folder_id, folder_name, folder_date, clip_id),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def get_clips_by_folder(self, folder_id: str, limit: int = 100) -> List[Dict]:
+        """Retrieves clips belonging to a specific folder."""
         with self._get_connection() as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
+            cursor.execute(
+                "SELECT * FROM clips WHERE folder_id = ? ORDER BY created_at DESC LIMIT ?",
+                (folder_id, limit),
+            )
+            rows = cursor.fetchall()
+            return [dict(r) for r in rows]
+
+    def get_recent_clips(
+        self,
+        limit: int = 50,
+        channel: Optional[str] = None,
+        folder_id: Optional[str] = None,
+    ) -> List[Dict]:
+        """Retrieves recent clips, optionally filtered by channel name and/or folder ID."""
+        with self._get_connection() as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            query = "SELECT * FROM clips"
+            params: List[Any] = []
+            conditions: List[str] = []
+
             if channel:
-                cursor.execute(
-                    "SELECT * FROM clips WHERE LOWER(channel_name) = ? ORDER BY created_at DESC LIMIT ?",
-                    (channel.lower(), limit),
-                )
-            else:
-                cursor.execute("SELECT * FROM clips ORDER BY created_at DESC LIMIT ?", (limit,))
+                conditions.append("LOWER(channel_name) = ?")
+                params.append(channel.lower())
+            if folder_id:
+                conditions.append("folder_id = ?")
+                params.append(folder_id)
+
+            if conditions:
+                query += " WHERE " + " AND ".join(conditions)
+
+            query += " ORDER BY created_at DESC LIMIT ?"
+            params.append(limit)
+
+            cursor.execute(query, tuple(params))
             rows = cursor.fetchall()
             return [dict(r) for r in rows]
 

@@ -1409,4 +1409,328 @@ body.studio-mode #twitch-frame {
   transform: translateY(-1px);
 }
 
+/* ==========================================================================
+   Clip Folder Node & Folder View Modal
+   ========================================================================== */
+.clip-folder-widget .folder-name-input:focus,
+.clip-folder-widget .folder-date-input:focus {
+  outline: none;
+  border-color: #f97316 !important;
+  box-shadow: 0 0 8px rgba(249, 115, 22, 0.4);
+}
+
+.folder-view-btn:hover {
+  background: linear-gradient(135deg, rgba(249, 115, 22, 0.4), rgba(234, 88, 12, 0.6)) !important;
+  border-color: #fb923c !important;
+  box-shadow: 0 0 12px rgba(249, 115, 22, 0.4);
+  transform: translateY(-1px);
+}
+
+.folder-view-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(8, 12, 20, 0.85);
+  backdrop-filter: blur(12px);
+  z-index: 99999;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.folder-view-modal.active {
+  display: flex;
+}
+
+.folder-view-window {
+  background: #0f172a;
+  border: 1px solid rgba(249, 115, 22, 0.4);
+  border-radius: 14px;
+  width: 95vw;
+  max-width: 1080px;
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.9), 0 0 40px rgba(249, 115, 22, 0.15);
+  overflow: hidden;
+}
+
+.folder-view-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  background: rgba(15, 23, 42, 0.95);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.folder-view-title-group {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.folder-view-title {
+  font-size: 17px;
+  font-weight: 800;
+  color: #f8fafc;
+  letter-spacing: -0.2px;
+}
+
+.folder-view-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  flex-wrap: wrap;
+}
+
+.fview-pill {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.fview-date {
+  background: rgba(255, 255, 255, 0.06);
+  color: #94a3b8;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.fview-count {
+  background: rgba(249, 115, 22, 0.15);
+  color: #fb923c;
+  border: 1px solid rgba(249, 115, 22, 0.3);
+}
+
+.fview-renderers {
+  background: rgba(56, 189, 248, 0.15);
+  color: #38bdf8;
+  border: 1px solid rgba(56, 189, 248, 0.3);
+}
+
+.folder-view-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.fview-search {
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  color: #f8fafc;
+  font-size: 11px;
+  padding: 6px 12px;
+  outline: none;
+  min-width: 180px;
+  transition: all 0.18s ease;
+}
+
+.fview-search:focus {
+  border-color: #f97316;
+  box-shadow: 0 0 10px rgba(249, 115, 22, 0.3);
+}
+
+.folder-active-player {
+  background: #090d16;
+  border-bottom: 1px solid rgba(249, 115, 22, 0.3);
+  padding: 14px 20px;
+}
+
+.folder-view-body {
+  padding: 20px;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 16px;
+  flex: 1;
+}
+
+.fview-loading,
+.fview-empty {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 20px;
+  color: #94a3b8;
+  font-size: 13px;
+}
+
+.fview-clip-card {
+  background: rgba(30, 41, 59, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 10px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  transition: all 0.2s ease;
+}
+
+.fview-clip-card:hover {
+  border-color: rgba(249, 115, 22, 0.5);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6), 0 0 16px rgba(249, 115, 22, 0.15);
+  transform: translateY(-2px);
+}
+
+.fview-card-thumb {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: #020617;
+  overflow: hidden;
+}
+
+.fview-card-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 0.25s ease;
+}
+
+.fview-clip-card:hover .fview-card-thumb img {
+  transform: scale(1.04);
+}
+
+.fview-play-badge {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.4);
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 800;
+  opacity: 0;
+  transition: opacity 0.18s ease;
+  cursor: pointer;
+}
+
+.fview-card-thumb:hover .fview-play-badge {
+  opacity: 1;
+}
+
+.fview-dur-pill {
+  position: absolute;
+  bottom: 6px;
+  right: 6px;
+  background: rgba(0, 0, 0, 0.85);
+  color: #f8fafc;
+  font-size: 9px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.fview-score-pill {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  background: rgba(245, 158, 11, 0.9);
+  color: #000000;
+  font-size: 9px;
+  font-weight: 800;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.fview-card-body {
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+
+.fview-clip-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #f1f5f9;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 6px;
+}
+
+.fview-clip-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.fview-ch-badge {
+  font-size: 9px;
+  font-weight: 700;
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.12);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+.fview-date {
+  font-size: 9px;
+  color: #64748b;
+}
+
+.fview-card-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: auto;
+}
+
+.fview-action-btn {
+  padding: 5px 8px;
+  border-radius: 5px;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: all 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+}
+
+.fview-action-btn.play-btn {
+  flex: 1;
+  background: rgba(56, 189, 248, 0.15);
+  border-color: rgba(56, 189, 248, 0.3);
+  color: #38bdf8;
+}
+
+.fview-action-btn.play-btn:hover {
+  background: #38bdf8;
+  color: #000;
+}
+
+.fview-action-btn.download-btn {
+  background: rgba(34, 197, 94, 0.15);
+  border-color: rgba(34, 197, 94, 0.3);
+  color: #4ade80;
+}
+
+.fview-action-btn.download-btn:hover {
+  background: #22c55e;
+  color: #000;
+}
+
+.fview-action-btn.delete-btn {
+  background: rgba(239, 68, 68, 0.15);
+  border-color: rgba(239, 68, 68, 0.3);
+  color: #f87171;
+  padding: 5px 8px;
+}
+
+.fview-action-btn.delete-btn:hover {
+  background: #ef4444;
+  color: #ffffff;
+}
+
 

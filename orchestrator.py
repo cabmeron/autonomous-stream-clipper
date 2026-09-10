@@ -344,6 +344,7 @@ class StreamSession:
     def get_status(self) -> dict:
         return {
             "channel": self.channel,
+            "platform": self.platform,
             "status": "monitoring",
             "is_buffering": self.buffer.is_alive() if self.buffer else False,
             "buffered_segments": len(self.buffer.get_active_segments()) if self.buffer else 0,
@@ -588,7 +589,13 @@ class StreamClipperOrchestrator:
         """Returns summary status for all active sessions."""
         return [sess.get_status() for sess in self.sessions.values()]
 
-    async def add_session(self, channel: str, simulate: bool = False, platform: Optional[str] = None) -> dict:
+    async def add_session(
+        self,
+        channel: str,
+        simulate: bool = False,
+        platform: Optional[str] = None,
+        auto_sequence: bool = True,
+    ) -> dict:
         """Adds a new channel session and begins ingestion."""
         clean, detected_plat = detect_channel_and_platform(channel, default_platform=platform or "twitch")
         plat = (platform or detected_plat).lower()
@@ -608,6 +615,15 @@ class StreamClipperOrchestrator:
             session.start(self.loop)
         self.sessions[clean] = session
 
+        # Sync with Node Graph DAG if initialized
+        if hasattr(self, "graph_manager") and self.graph_manager:
+            try:
+                self.graph_manager.add_stream_pipeline(
+                    clean, platform=plat, auto_sequence=auto_sequence, simulate=simulate
+                )
+            except Exception as ge:
+                logger.warning("[Orchestrator] Failed to update graph for #%s: %s", clean, ge)
+
         logger.info("[Orchestrator] Active sessions (%d total): %s", len(self.sessions), list(self.sessions.keys()))
         return session.get_status()
 
@@ -617,6 +633,11 @@ class StreamClipperOrchestrator:
         if clean in self.sessions:
             session = self.sessions.pop(clean)
             session.stop()
+            if hasattr(self, "graph_manager") and self.graph_manager:
+                try:
+                    self.graph_manager.remove_stream_pipeline(clean)
+                except Exception as ge:
+                    logger.warning("[Orchestrator] Failed to remove graph node for #%s: %s", clean, ge)
             logger.info("[Orchestrator] Removed session #%s (%d remaining)", clean, len(self.sessions))
             return True
         return False
@@ -997,7 +1018,15 @@ class StreamClipperOrchestrator:
             self.update_job_step(job_id, "save", "running", 95, log_msg="Saving clip to local storage and SQLite database...")
             video_url, thumb_url = self.storage.store_clip_bundle(out_video, out_thumb if out_thumb else out_video)
 
-            # Step 9: Persist to local SQLite database with verified actual duration
+            # Step 9: Resolve downstream folder association from DAG
+            folder_info = None
+            if hasattr(self, "graph_manager") and self.graph_manager:
+                try:
+                    folder_info = self.graph_manager.get_downstream_folder_for_session(active_channel)
+                except Exception as fe:
+                    logger.debug("[DAG] Downstream folder lookup exception: %s", fe)
+
+            # Persist to local SQLite database with verified actual duration and folder metadata
             clip_record = {
                 "channel_name": active_channel,
                 "video_url": video_url,
@@ -1014,10 +1043,16 @@ class StreamClipperOrchestrator:
                 "suggested_caption": caption,
                 "transcript_json": words,
                 "status": "pending_triage",
+                "folder_id": folder_info["folder_id"] if folder_info else None,
+                "folder_name": folder_info["folder_name"] if folder_info else None,
+                "folder_date": folder_info["folder_date"] if folder_info else None,
             }
             clip_id = self.db.save_clip(clip_record)
 
-            logger.info("[DAG] Successfully stored full-sized clip %s locally! Video URL: %s", clip_id, video_url)
+            logger.info(
+                "[DAG] Successfully stored full-sized clip %s locally! (Folder: %s) Video URL: %s",
+                clip_id, folder_info.get("folder_name") if folder_info else "Uncategorized", video_url
+            )
 
             clip_summary = {
                 "id": clip_id,
@@ -1027,6 +1062,9 @@ class StreamClipperOrchestrator:
                 "duration": actual_video_duration,
                 "duration_seconds": actual_video_duration,
                 "video_url": video_url,
+                "folder_id": folder_info["folder_id"] if folder_info else None,
+                "folder_name": folder_info["folder_name"] if folder_info else None,
+                "folder_date": folder_info["folder_date"] if folder_info else None,
             }
 
             # Mark job completed
@@ -1077,7 +1115,10 @@ class StreamClipperOrchestrator:
                 channel = data.get("channel", "")
                 platform = data.get("platform")
                 simulate = bool(data.get("simulate", False))
-                res = await self.add_session(channel, simulate=simulate, platform=platform)
+                auto_sequence = bool(data.get("auto_sequence", True))
+                res = await self.add_session(
+                    channel, simulate=simulate, platform=platform, auto_sequence=auto_sequence
+                )
                 return web.json_response(res)
             except ValueError as ve:
                 return web.json_response({"error": str(ve)}, status=400)
@@ -1109,8 +1150,27 @@ class StreamClipperOrchestrator:
             channel_filter = request.query.get("channel")
             if channel_filter:
                 channel_filter = clean_channel_name(channel_filter)
-            clips = self.db.get_recent_clips(limit=limit, channel=channel_filter)
+            folder_filter = request.query.get("folder_id")
+            clips = self.db.get_recent_clips(limit=limit, channel=channel_filter, folder_id=folder_filter)
             return web.json_response(clips)
+
+        async def get_folder_clips_handler(request):
+            folder_id = request.match_info["folder_id"]
+            limit = int(request.query.get("limit", 100))
+            clips = self.db.get_clips_by_folder(folder_id, limit=limit)
+            return web.json_response(clips)
+
+        async def post_clip_folder_handler(request):
+            clip_id = request.match_info["id"]
+            try:
+                data = await request.json()
+                folder_id = data.get("folder_id")
+                folder_name = data.get("folder_name")
+                folder_date = data.get("folder_date")
+                success = self.db.update_clip_folder(clip_id, folder_id, folder_name, folder_date)
+                return web.json_response({"success": success, "id": clip_id, "folder_id": folder_id})
+            except Exception as e:
+                return web.json_response({"error": str(e)}, status=400)
 
         async def delete_clip_handler(request):
             clip_id = request.match_info["id"]
@@ -1231,6 +1291,8 @@ class StreamClipperOrchestrator:
         app.router.add_get("/api/clips", get_clips_handler)
         app.router.add_delete("/api/clips/{id}", delete_clip_handler)
         app.router.add_post("/api/clips/{id}/status", post_clip_status_handler)
+        app.router.add_get("/api/folders/{folder_id}/clips", get_folder_clips_handler)
+        app.router.add_post("/api/clips/{id}/folder", post_clip_folder_handler)
 
         app.router.add_get("/api/jobs", get_jobs_handler)
         app.router.add_get("/api/jobs/{id}", get_job_detail_handler)
@@ -1545,9 +1607,24 @@ class StreamClipperOrchestrator:
             except Exception as e:
                 return web.json_response({"error": str(e)}, status=400)
 
+        async def post_graph_stream_pipeline_handler(request):
+            try:
+                data = await request.json()
+                channel = data.get("channel", "")
+                platform = data.get("platform", "twitch")
+                auto_sequence = bool(data.get("auto_sequence", True))
+                simulate = bool(data.get("simulate", False))
+                res = self.graph_manager.add_stream_pipeline(
+                    channel, platform=platform, auto_sequence=auto_sequence, simulate=simulate
+                )
+                return web.json_response(res)
+            except Exception as e:
+                return web.json_response({"error": str(e)}, status=400)
+
         app.router.add_get("/api/graph", get_graph_handler)
         app.router.add_post("/api/graph/sync", post_graph_sync_handler)
         app.router.add_post("/api/graph/nodes/{id}/param", post_graph_node_param_handler)
+        app.router.add_post("/api/graph/stream-pipeline", post_graph_stream_pipeline_handler)
 
         # Static mounts
         app.router.add_static("/clips", clips_dir)

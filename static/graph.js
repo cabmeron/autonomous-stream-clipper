@@ -49,6 +49,7 @@
         { type: "GateEvaluatorNode", category: "gate", title: "Gate Evaluator & Logic", icon: "⚡", desc: "Weighted scoring & debounce" },
         { type: "SegmentSlicerNode", category: "slicer", title: "Rolling Segment Slicer", icon: "✂️", desc: "60s zero-copy extraction" },
         { type: "HardwareRenderNode", category: "render", title: "Hardware Video Renderer", icon: "🎬", desc: "Uncropped 1080p / 9:16 vertical" },
+        { type: "ClipFolderNode", category: "storage", title: "Clip Folder / Collection", icon: "📂", desc: "Multi-renderer folder repository & date organizer" },
       ];
 
       this.initEvents();
@@ -331,6 +332,9 @@
       this.wires.push(newWire);
       this.renderWires();
       this.syncGraphDebounced();
+      if (this.latestTelemetry) {
+        this.applyTelemetry(this.latestTelemetry);
+      }
     }
 
     deleteWire(wireId) {
@@ -338,6 +342,9 @@
       this.selectedWireId = null;
       this.renderWires();
       this.syncGraphDebounced();
+      if (this.latestTelemetry) {
+        this.applyTelemetry(this.latestTelemetry);
+      }
     }
 
     selectWire(wireId) {
@@ -512,16 +519,294 @@
       if (window.activeSessions) {
         Object.keys(window.activeSessions).forEach((c) => channels.add(c.toLowerCase()));
       }
+      if (this.latestTelemetry && this.latestTelemetry.sessions) {
+        Object.keys(this.latestTelemetry.sessions).forEach((c) => channels.add(c.toLowerCase()));
+      }
       if (channels.size === 0) {
         channels.add("marlon");
+      }
+
+      const expectedKeys = Array.from(channels).join(",");
+      const currentKeys = Array.from(selectEl.options).map((o) => o.value).join(",");
+      if (expectedKeys === currentKeys) {
+        if (currentChannel && selectEl.value !== currentChannel.toLowerCase()) {
+          selectEl.value = currentChannel.toLowerCase();
+        }
+        return;
       }
 
       selectEl.innerHTML = Array.from(channels)
         .map(
           (c) =>
-            `<option value="${c}" ${c === currentChannel.toLowerCase() ? "selected" : ""}>#${c.toUpperCase()}</option>`
+            `<option value="${c}" ${c === (currentChannel || "").toLowerCase() ? "selected" : ""}>#${c.toUpperCase()}</option>`
         )
         .join("");
+    }
+
+    populateSourceSelect(selectEl, node) {
+      if (!selectEl || !node) return;
+      const currentCh = (node.properties?.channel || "auto").toLowerCase();
+      const autoCh = this.findUpstreamChannel(node.id, new Set());
+      const autoLabel = autoCh ? `⚡ Auto (#${autoCh.toUpperCase()})` : "⚡ Auto (Wire)";
+
+      const channels = new Set();
+      if (window.activeSessions) {
+        Object.keys(window.activeSessions).forEach((c) => channels.add(c.toLowerCase()));
+      }
+      if (this.latestTelemetry && this.latestTelemetry.sessions) {
+        Object.keys(this.latestTelemetry.sessions).forEach((c) => channels.add(c.toLowerCase()));
+      }
+      for (const n of this.nodes.values()) {
+        if (n.type === "StreamSourceNode" && n.properties?.channel) {
+          channels.add(n.properties.channel.toLowerCase());
+        }
+      }
+
+      const expectedKeys = ["auto", ...Array.from(channels)].join(",");
+      const currentKeys = Array.from(selectEl.options).map((o) => o.value).join(",");
+      const firstOptText = selectEl.options[0]?.text;
+
+      if (expectedKeys === currentKeys && firstOptText === autoLabel) {
+        if (selectEl.value !== currentCh) {
+          selectEl.value = currentCh;
+        }
+        return;
+      }
+
+      let html = `<option value="auto" ${currentCh === "auto" ? "selected" : ""}>${autoLabel}</option>`;
+      for (const ch of channels) {
+        html += `<option value="${ch}" ${currentCh === ch ? "selected" : ""}>#${ch.toUpperCase()}</option>`;
+      }
+      selectEl.innerHTML = html;
+    }
+
+    setupSourceSelect(widget, node) {
+      const selectEl = widget.querySelector(`#source-select-${node.id}`);
+      if (!selectEl) return;
+      this.populateSourceSelect(selectEl, node);
+      selectEl.addEventListener("change", (e) => {
+        node.properties = node.properties || {};
+        node.properties.channel = e.target.value;
+        this.syncNodeParamDebounced(node.id, "channel", node.properties.channel);
+        if (this.latestTelemetry) {
+          this.applyTelemetry(this.latestTelemetry);
+        }
+      });
+    }
+
+    getNodeSourceChannel(node) {
+      if (!node) return null;
+      if (node.type === "StreamSourceNode") {
+        return (node.properties?.channel || "").replace(/^#/, "").toLowerCase() || null;
+      }
+      const explicit = node.properties?.channel;
+      if (explicit && explicit !== "auto") {
+        return explicit.replace(/^#/, "").toLowerCase();
+      }
+      return this.findUpstreamChannel(node.id, new Set());
+    }
+
+    findUpstreamChannel(nodeId, visited = new Set()) {
+      if (visited.has(nodeId)) return null;
+      visited.add(nodeId);
+
+      for (const wire of this.wires) {
+        const dstNodeId = wire.to.split(":")[0];
+        if (dstNodeId === nodeId) {
+          const srcNodeId = wire.from.split(":")[0];
+          const srcNode = this.nodes.get(srcNodeId);
+          if (!srcNode) continue;
+          if (srcNode.type === "StreamSourceNode") {
+            const ch = (srcNode.properties?.channel || "").replace(/^#/, "").toLowerCase();
+            if (ch) return ch;
+          }
+          const upstreamCh = this.findUpstreamChannel(srcNodeId, visited);
+          if (upstreamCh) return upstreamCh;
+        }
+      }
+      return null;
+    }
+
+    renderUnroutedNodeState(node) {
+      if (!node || node.type === "StreamSourceNode" || node.type === "ClipFolderNode") return;
+      const nodeId = node.id;
+      const el = document.getElementById(`node-${nodeId}`);
+      if (el) el.classList.remove("spiking");
+
+      if (node.type === "CVTransformerNode") {
+        const topValEl = document.getElementById(`cv-top-val-${nodeId}`);
+        const latencyTag = document.getElementById(`cv-latency-tag-${nodeId}`);
+        const thumbImg = document.getElementById(`cv-thumb-${nodeId}`);
+        const thumbPlaceholder = document.getElementById(`cv-thumb-placeholder-${nodeId}`);
+        const barsBox = document.getElementById(`cv-bars-${nodeId}`);
+
+        if (topValEl) {
+          topValEl.textContent = "UNROUTED";
+          topValEl.style.color = "#64748b";
+        }
+        if (latencyTag) latencyTag.textContent = "-- ms";
+        if (thumbImg) {
+          thumbImg.style.display = "none";
+          thumbImg.removeAttribute("src");
+        }
+        if (thumbPlaceholder) {
+          thumbPlaceholder.style.display = "flex";
+          thumbPlaceholder.textContent = "Unrouted (Connect Video In or Assign Stream)";
+        }
+        if (barsBox) {
+          barsBox.innerHTML = '<div style="color:#475569; font-size:10px; text-align:center; padding:8px 0;">No active stream routed</div>';
+        }
+      } else if (node.type === "OCRVisionNode") {
+        const valEl = document.getElementById(`ocr-val-${nodeId}`);
+        const statusEl = document.getElementById(`ocr-status-${nodeId}`);
+        const ocrImg = document.getElementById(`ocr-live-img-${nodeId}`);
+        const ocrPlaceholder = document.getElementById(`ocr-placeholder-${nodeId}`);
+        const listEl = document.getElementById(`ocr-node-list-${nodeId}`);
+
+        if (valEl) {
+          valEl.textContent = "— (Unrouted)";
+          valEl.style.color = "#64748b";
+        }
+        if (statusEl) {
+          statusEl.textContent = "UNROUTED";
+          statusEl.style.color = "#64748b";
+        }
+        if (ocrImg) {
+          ocrImg.style.display = "none";
+          ocrImg.removeAttribute("src");
+        }
+        if (ocrPlaceholder) {
+          ocrPlaceholder.style.display = "block";
+          ocrPlaceholder.textContent = "Unrouted (Connect Video In or Assign Stream)";
+        }
+        if (listEl) {
+          listEl.innerHTML = '<div style="color:#475569; font-size:10px; text-align:center; padding:6px 0;">No stream data</div>';
+        }
+      } else if (node.type === "FacecamEmotionNode") {
+        const faceImg = document.getElementById(`face-live-img-${nodeId}`);
+        const facePlaceholder = document.getElementById(`face-placeholder-${nodeId}`);
+        const tiltNum = document.getElementById(`face-tilt-num-${nodeId}`);
+        const tiltPill = document.getElementById(`face-tilt-pill-${nodeId}`);
+        const topVal = document.getElementById(`face-top-val-${nodeId}`);
+        const euphoriaVal = document.getElementById(`face-euphoria-val-${nodeId}`);
+        const valenceVal = document.getElementById(`face-valence-val-${nodeId}`);
+        const barsBox = document.getElementById(`face-bars-${nodeId}`);
+        const latencyTag = document.getElementById(`face-latency-tag-${nodeId}`);
+
+        if (faceImg) {
+          faceImg.style.display = "none";
+          faceImg.removeAttribute("src");
+        }
+        if (facePlaceholder) {
+          facePlaceholder.style.display = "block";
+          facePlaceholder.textContent = "Unrouted (Connect Video In or Assign Stream)";
+        }
+        if (tiltNum) {
+          tiltNum.textContent = "--";
+          tiltNum.style.color = "#64748b";
+        }
+        if (tiltPill) {
+          tiltPill.textContent = "UNROUTED";
+          tiltPill.style.color = "#64748b";
+          tiltPill.style.background = "rgba(100,116,139,0.15)";
+        }
+        if (topVal) {
+          topVal.textContent = "STANDBY";
+          topVal.style.color = "#64748b";
+        }
+        if (euphoriaVal) euphoriaVal.textContent = "--%";
+        if (valenceVal) valenceVal.textContent = "--";
+        if (latencyTag) latencyTag.textContent = "-- ms";
+        if (barsBox) {
+          barsBox.innerHTML = '<div style="color:#475569; font-size:10px; text-align:center; padding:8px 0;">No stream data</div>';
+        }
+      } else if (node.type === "AudioMonitorNode") {
+        const valEl = document.getElementById(`audio-val-${nodeId}`);
+        const spikeTag = document.getElementById(`audio-spike-tag-${nodeId}`);
+        const canvas = document.getElementById(`wave-canvas-${nodeId}`);
+
+        if (valEl) valEl.textContent = "-- dB";
+        if (spikeTag) {
+          spikeTag.textContent = "UNROUTED";
+          spikeTag.style.color = "#64748b";
+        }
+        if (canvas) {
+          const ctx = canvas.getContext("2d");
+          if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
+        }
+      } else if (node.type === "ChatVelocityNode") {
+        const valEl = document.getElementById(`chat-val-${nodeId}`);
+        const spikeTag = document.getElementById(`chat-spike-tag-${nodeId}`);
+        const ticker = document.getElementById(`chat-ticker-${nodeId}`);
+
+        if (valEl) valEl.textContent = "0.0 msgs/s";
+        if (spikeTag) {
+          spikeTag.textContent = "UNROUTED";
+          spikeTag.style.color = "#64748b";
+        }
+        if (ticker) {
+          ticker.innerHTML = '<div style="color:#475569; font-size:10px; text-align:center; padding:12px 0;">Connect Chat In to stream</div>';
+        }
+      } else if (node.type === "GamblingOCRNode") {
+        const gImg = document.getElementById(`g-live-img-${nodeId}`);
+        const gPlaceholder = document.getElementById(`g-placeholder-${nodeId}`);
+        const spinBadge = document.getElementById(`g-spin-state-${nodeId}`);
+        const balVal = document.getElementById(`g-bal-val-${nodeId}`);
+        const betVal = document.getElementById(`g-bet-val-${nodeId}`);
+        const winVal = document.getElementById(`g-win-val-${nodeId}`);
+        const multVal = document.getElementById(`g-mult-val-${nodeId}`);
+
+        if (gImg) {
+          gImg.style.display = "none";
+          gImg.removeAttribute("src");
+        }
+        if (gPlaceholder) {
+          gPlaceholder.style.display = "block";
+          gPlaceholder.textContent = "Unrouted (Connect Video In or Assign Stream)";
+        }
+        if (spinBadge) {
+          spinBadge.textContent = "UNROUTED";
+          spinBadge.style.color = "#64748b";
+        }
+        if (balVal) balVal.textContent = "$--";
+        if (betVal) betVal.textContent = "$--";
+        if (winVal) winVal.textContent = "$--";
+        if (multVal) multVal.textContent = "--x";
+      } else if (node.type === "GamblingLedgerNode") {
+        const pnlEl = document.getElementById(`ledger-pnl-${nodeId}`);
+        const chaseBadge = document.getElementById(`ledger-chase-badge-${nodeId}`);
+        const winrateEl = document.getElementById(`ledger-winrate-${nodeId}`);
+        const streakEl = document.getElementById(`ledger-streak-${nodeId}`);
+        const rtpEl = document.getElementById(`ledger-rtp-${nodeId}`);
+        const drawdownEl = document.getElementById(`ledger-drawdown-${nodeId}`);
+        const canvas = document.getElementById(`ledger-canvas-${nodeId}`);
+
+        if (pnlEl) {
+          pnlEl.textContent = "$0.00";
+          pnlEl.className = "ledger-pnl-val";
+        }
+        if (chaseBadge) chaseBadge.style.display = "none";
+        if (winrateEl) winrateEl.textContent = "0.0%";
+        if (streakEl) {
+          streakEl.textContent = "0";
+          streakEl.style.color = "#64748b";
+        }
+        if (rtpEl) rtpEl.textContent = "100.0%";
+        if (drawdownEl) drawdownEl.textContent = "$0.00";
+        if (canvas) {
+          const ctx = canvas.getContext("2d");
+          if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
+        }
+      } else if (node.type === "GateEvaluatorNode") {
+        const scoreEl = document.getElementById(`gate-score-${nodeId}`);
+        const statusEl = document.getElementById(`gate-status-${nodeId}`);
+        if (scoreEl) scoreEl.textContent = "0";
+        if (statusEl) {
+          statusEl.textContent = "UNROUTED";
+          statusEl.style.color = "#64748b";
+          statusEl.classList.remove("active");
+        }
+      }
     }
 
     setSelectedChannel(channel) {
@@ -529,33 +814,42 @@
       const cleanCh = channel.replace(/^#/, "").toLowerCase();
       this.selectedChannel = cleanCh;
 
-      for (const node of this.nodes.values()) {
-        if (node.type === "StreamSourceNode") {
-          node.properties = node.properties || {};
-          node.properties.channel = cleanCh;
-          const plat = (node.properties.platform || "twitch").toLowerCase();
-          const platLabel = plat === "kick" ? "Kick" : "Twitch";
-          node.title = `${platLabel} Source: #${cleanCh}`;
+      const streamSourceNodes = Array.from(this.nodes.values()).filter(
+        (n) => n.type === "StreamSourceNode"
+      );
 
-          // Update header title in DOM
-          const nodeEl = document.getElementById(`node-${node.id}`);
-          if (nodeEl) {
-            const titleEl = nodeEl.querySelector(".node-title");
-            if (titleEl) {
-              titleEl.textContent = `${platLabel} Source: #${cleanCh}`;
-            }
-            const selectEl = nodeEl.querySelector(`#channel-select-${node.id}`);
-            if (selectEl) {
-              this.populateChannelSelect(selectEl, cleanCh);
-            }
+      // Only update StreamSourceNode if there's exactly 1 stream source node.
+      // If multiple stream source nodes exist, each keeps its own channel!
+      if (streamSourceNodes.length === 1) {
+        const node = streamSourceNodes[0];
+        node.properties = node.properties || {};
+        node.properties.channel = cleanCh;
+        const plat = (node.properties.platform || "twitch").toLowerCase();
+        const platLabel = plat === "kick" ? "Kick" : "Twitch";
+        node.title = `${platLabel} Source: #${cleanCh}`;
+
+        // Update header title in DOM
+        const nodeEl = document.getElementById(`node-${node.id}`);
+        if (nodeEl) {
+          const titleEl = nodeEl.querySelector(".node-title");
+          if (titleEl) {
+            titleEl.textContent = `${platLabel} Source: #${cleanCh}`;
           }
-
-          // Remount mini player video to the selected channel
-          this.mountMiniPlayer(node.id, cleanCh);
-
-          // Sync parameter to backend DAG so telemetry focuses on this channel
-          this.syncNodeParamDebounced(node.id, "channel", cleanCh);
+          const selectEl = nodeEl.querySelector(`#channel-select-${node.id}`);
+          if (selectEl) {
+            this.populateChannelSelect(selectEl, cleanCh);
+          }
         }
+
+        // Remount mini player video to the selected channel
+        this.mountMiniPlayer(node.id, cleanCh);
+
+        // Sync parameter to backend DAG so telemetry focuses on this channel
+        this.syncNodeParamDebounced(node.id, "channel", cleanCh);
+      }
+
+      if (this.latestTelemetry) {
+        this.applyTelemetry(this.latestTelemetry);
       }
     }
 
@@ -684,8 +978,8 @@
       const props = node.properties || {};
 
       if (node.type === "StreamSourceNode") {
-        const currentChannel = (this.selectedChannel || node.properties?.channel || window.activeTab || "marlon").replace(/^#/, "").toLowerCase();
-        const currentPlatform = (node.properties?.platform || (window.latestTelemetry?.platform) || "twitch").toLowerCase();
+        const currentChannel = (node.properties?.channel || this.selectedChannel || window.activeTab || "marlon").replace(/^#/, "").toLowerCase();
+        const currentPlatform = (node.properties?.platform || (currentChannel.includes("kick") ? "kick" : "twitch")).toLowerCase();
         node.properties = node.properties || {};
         node.properties.channel = currentChannel;
         node.properties.platform = currentPlatform;
@@ -736,15 +1030,24 @@
           });
         }
 
-        // Populate and hook up select dropdown
+        // Populate and hook up select dropdown for this specific stream node
         const selectEl = widget.querySelector(`#channel-select-${node.id}`);
         if (selectEl) {
           this.populateChannelSelect(selectEl, currentChannel);
           selectEl.addEventListener("change", (e) => {
-            const newCh = e.target.value;
-            this.setSelectedChannel(newCh);
-            if (typeof window.selectTab === "function") {
-              window.selectTab(newCh);
+            const newCh = e.target.value.replace(/^#/, "").toLowerCase();
+            node.properties = node.properties || {};
+            node.properties.channel = newCh;
+            const plat = (node.properties.platform || (newCh.includes("kick") ? "kick" : "twitch")).toLowerCase();
+            node.properties.platform = plat;
+            const platLabel = plat === "kick" ? "Kick" : "Twitch";
+            node.title = `${platLabel} Source: #${newCh}`;
+            const titleEl = document.getElementById(`node-${node.id}`)?.querySelector(".node-title");
+            if (titleEl) titleEl.textContent = `${platLabel} Source: #${newCh}`;
+            this.mountMiniPlayer(node.id, newCh);
+            this.syncNodeParamDebounced(node.id, "channel", newCh);
+            if (this.latestTelemetry) {
+              this.applyTelemetry(this.latestTelemetry);
             }
           });
         }
@@ -762,14 +1065,20 @@
         const widget = document.createElement("div");
         widget.setAttribute("class", "node-widget");
         widget.innerHTML = `
+          <div class="node-source-row" style="margin-bottom:6px; display:flex; align-items:center; justify-content:space-between; gap:6px; background:rgba(0,0,0,0.25); padding:3px 6px; border-radius:4px;">
+            <span style="font-size:10px; color:#94a3b8; white-space:nowrap;">Stream Source:</span>
+            <select class="node-source-select" id="source-select-${node.id}" style="flex:1; max-width:140px; background:rgba(0,0,0,0.5); border:1px solid rgba(56,189,248,0.3); color:#38bdf8; font-size:10px; border-radius:4px; padding:2px 4px; cursor:pointer;">
+              <option value="auto">⚡ Auto (Wire)</option>
+            </select>
+          </div>
           <div class="widget-label">
             <span>Live RMS Decibel Level</span>
-            <span class="widget-val" id="audio-val-${node.id}">-32.0 dB</span>
+            <span class="widget-val" id="audio-val-${node.id}">-- dB</span>
           </div>
           <canvas class="node-wave-canvas" id="wave-canvas-${node.id}" width="280" height="52"></canvas>
           <div style="display:flex; justify-content:space-between; font-size:9px; color:#94a3b8;">
             <span>Spike Threshold: +${props.jump_db_threshold || 12} dB</span>
-            <span id="audio-spike-tag-${node.id}" style="color:#64748b;">QUIET</span>
+            <span id="audio-spike-tag-${node.id}" style="color:#64748b;">UNROUTED</span>
           </div>
           <input type="range" class="node-slider" min="6" max="24" step="1" value="${props.jump_db_threshold || 12}" />
         `;
@@ -779,31 +1088,45 @@
           widget.querySelector("span:nth-child(1)").textContent = `Spike Threshold: +${props.jump_db_threshold} dB`;
           this.syncNodeParamDebounced(node.id, "jump_db_threshold", props.jump_db_threshold);
         });
+        this.setupSourceSelect(widget, node);
         bodyEl.appendChild(widget);
       } else if (node.type === "ChatVelocityNode") {
         const widget = document.createElement("div");
         widget.setAttribute("class", "node-widget");
         widget.innerHTML = `
+          <div class="node-source-row" style="margin-bottom:6px; display:flex; align-items:center; justify-content:space-between; gap:6px; background:rgba(0,0,0,0.25); padding:3px 6px; border-radius:4px;">
+            <span style="font-size:10px; color:#94a3b8; white-space:nowrap;">Stream Source:</span>
+            <select class="node-source-select" id="source-select-${node.id}" style="flex:1; max-width:140px; background:rgba(0,0,0,0.5); border:1px solid rgba(56,189,248,0.3); color:#38bdf8; font-size:10px; border-radius:4px; padding:2px 4px; cursor:pointer;">
+              <option value="auto">⚡ Auto (Wire)</option>
+            </select>
+          </div>
           <div class="widget-label">
             <span>Chat Density Velocity</span>
             <span class="widget-val" id="chat-val-${node.id}">0.0 msgs/s</span>
           </div>
           <div class="node-chat-ticker" id="chat-ticker-${node.id}">
-            <div class="node-chat-msg"><span class="chat-user">system</span><span class="chat-text">Listening to IRC stream...</span></div>
+            <div style="color:#475569; font-size:10px; text-align:center; padding:12px 0;">Connect Chat In to stream</div>
           </div>
           <div style="display:flex; justify-content:space-between; font-size:9px; color:#94a3b8; margin-top:4px;">
             <span>Spike Ratio: ${props.spike_ratio_threshold || 3.0}x</span>
-            <span id="chat-spike-tag-${node.id}" style="color:#64748b;">NORMAL</span>
+            <span id="chat-spike-tag-${node.id}" style="color:#64748b;">UNROUTED</span>
           </div>
         `;
+        this.setupSourceSelect(widget, node);
         bodyEl.appendChild(widget);
       } else if (node.type === "OCRVisionNode") {
         const widget = document.createElement("div");
         widget.setAttribute("class", "node-widget");
         widget.innerHTML = `
+          <div class="node-source-row" style="margin-bottom:6px; display:flex; align-items:center; justify-content:space-between; gap:6px; background:rgba(0,0,0,0.25); padding:3px 6px; border-radius:4px;">
+            <span style="font-size:10px; color:#94a3b8; white-space:nowrap;">Stream Source:</span>
+            <select class="node-source-select" id="source-select-${node.id}" style="flex:1; max-width:140px; background:rgba(0,0,0,0.5); border:1px solid rgba(56,189,248,0.3); color:#38bdf8; font-size:10px; border-radius:4px; padding:2px 4px; cursor:pointer;">
+              <option value="auto">⚡ Auto (Wire)</option>
+            </select>
+          </div>
           <div class="widget-label">
             <span>Interactive ROI Crop Box</span>
-            <span class="widget-val" id="ocr-val-${node.id}">1.0x Multiplier</span>
+            <span class="widget-val" id="ocr-val-${node.id}">— (Unrouted)</span>
           </div>
           <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px; margin-top:2px;">
             <span style="font-size:9px; color:#94a3b8; font-weight:700;">PRESET:</span>
@@ -816,11 +1139,11 @@
           </div>
           <div class="node-roi-container roi-container-${node.id}">
             <img class="roi-live-img" id="ocr-live-img-${node.id}" style="display:none;" />
-            <div class="roi-placeholder-text" id="ocr-placeholder-${node.id}">Live Screen Frame (Drag Box to Select Area)</div>
+            <div class="roi-placeholder-text" id="ocr-placeholder-${node.id}">Unrouted (Connect Video In or Assign Stream)</div>
           </div>
           <div style="display:flex; justify-content:space-between; font-size:9px; color:#94a3b8; margin-top:4px;">
             <span>Win Threshold: ≥ ${props.multiplier_threshold || 100}x</span>
-            <span id="ocr-status-${node.id}" style="color:#10b981;">MONITORING</span>
+            <span id="ocr-status-${node.id}" style="color:#64748b;">UNROUTED</span>
           </div>
           <input type="range" class="node-slider" min="10" max="500" step="10" value="${props.multiplier_threshold || 100}" />
           <div class="ocr-node-list" id="ocr-node-list-${node.id}" style="margin-top:6px; display:flex; flex-direction:column; gap:4px; max-height:140px; overflow-y:auto;"></div>
@@ -852,6 +1175,7 @@
           });
         });
 
+        this.setupSourceSelect(widget, node);
         bodyEl.appendChild(widget);
 
         // Mount interactive draggable ROI box
@@ -875,38 +1199,41 @@
         widget.setAttribute("class", "node-widget");
         const tiltThresh = props.tilt_threshold !== undefined ? props.tilt_threshold : 65.0;
         widget.innerHTML = `
+          <div class="node-source-row" style="margin-bottom:6px; display:flex; align-items:center; justify-content:space-between; gap:6px; background:rgba(0,0,0,0.25); padding:3px 6px; border-radius:4px;">
+            <span style="font-size:10px; color:#94a3b8; white-space:nowrap;">Stream Source:</span>
+            <select class="node-source-select" id="source-select-${node.id}" style="flex:1; max-width:140px; background:rgba(0,0,0,0.5); border:1px solid rgba(56,189,248,0.3); color:#38bdf8; font-size:10px; border-radius:4px; padding:2px 4px; cursor:pointer;">
+              <option value="auto">⚡ Auto (Wire)</option>
+            </select>
+          </div>
           <div class="widget-label">
             <span>Facecam ROI & Emotional Dynamics</span>
-            <span class="widget-val" id="face-top-val-${node.id}">CALM</span>
+            <span class="widget-val" id="face-top-val-${node.id}">STANDBY</span>
           </div>
           <div class="node-roi-container roi-container-${node.id}">
             <img class="roi-live-img" id="face-live-img-${node.id}" style="display:none;" />
-            <div class="roi-placeholder-text" id="face-placeholder-${node.id}">Stream Frame (Drag Box Over Facecam)</div>
+            <div class="roi-placeholder-text" id="face-placeholder-${node.id}">Unrouted (Connect Video In or Assign Stream)</div>
           </div>
           <div class="tilt-card">
             <div class="tilt-meter-box">
               <span style="font-size: 9px; color: #94a3b8; font-weight: 700;">TILT INDEX</span>
-              <span class="tilt-num" id="face-tilt-num-${node.id}" style="color: #34d399;">0.0</span>
+              <span class="tilt-num" id="face-tilt-num-${node.id}" style="color: #64748b;">--</span>
             </div>
             <div style="text-align: right;">
-              <span class="tilt-state-pill" id="face-tilt-pill-${node.id}" style="background: rgba(52, 211, 153, 0.15); color: #34d399;">CALM</span>
-              <div style="font-size: 9px; color: #94a3b8; margin-top: 4px;">Euphoria: <strong id="face-euphoria-val-${node.id}" style="color: #fbbf24;">0%</strong></div>
+              <span class="tilt-state-pill" id="face-tilt-pill-${node.id}" style="background: rgba(100, 116, 139, 0.15); color: #64748b;">UNROUTED</span>
+              <div style="font-size: 9px; color: #94a3b8; margin-top: 4px;">Euphoria: <strong id="face-euphoria-val-${node.id}" style="color: #64748b;">--%</strong></div>
             </div>
           </div>
           <div style="margin-top: 6px;">
             <div style="display: flex; justify-content: space-between; font-size: 9px; color: #94a3b8;">
               <span>Valence (Frustrated ⟵ ⟶ Happy)</span>
-              <span id="face-valence-val-${node.id}">0.0</span>
+              <span id="face-valence-val-${node.id}">--</span>
             </div>
             <div class="valence-track">
               <div class="valence-indicator" id="face-valence-ind-${node.id}" style="left: 50%;"></div>
             </div>
           </div>
           <div class="cv-bars-box" id="face-bars-${node.id}">
-            <div class="cv-prob-row"><span class="cv-prob-label">joy</span><div class="cv-prob-track"><div class="cv-prob-fill" style="width: 10%; background: #34d399;"></div></div><span class="cv-prob-pct">10%</span></div>
-            <div class="cv-prob-row"><span class="cv-prob-label">rage</span><div class="cv-prob-track"><div class="cv-prob-fill" style="width: 5%; background: #ef4444;"></div></div><span class="cv-prob-pct">5%</span></div>
-            <div class="cv-prob-row"><span class="cv-prob-label">shock</span><div class="cv-prob-track"><div class="cv-prob-fill" style="width: 5%; background: #f59e0b;"></div></div><span class="cv-prob-pct">5%</span></div>
-            <div class="cv-prob-row"><span class="cv-prob-label">despair</span><div class="cv-prob-track"><div class="cv-prob-fill" style="width: 5%; background: #a855f7;"></div></div><span class="cv-prob-pct">5%</span></div>
+            <div style="color:#475569; font-size:10px; text-align:center; padding:8px 0;">No active stream routed</div>
           </div>
           <div style="display:flex; justify-content:space-between; font-size:9px; color:#94a3b8; margin-top:4px;">
             <span id="tilt-thresh-label-${node.id}">Tilt Trigger Threshold: ≥ ${tiltThresh}</span>
@@ -920,6 +1247,7 @@
           widget.querySelector(`#tilt-thresh-label-${node.id}`).textContent = `Tilt Trigger Threshold: ≥ ${props.tilt_threshold}`;
           this.syncNodeParamDebounced(node.id, "tilt_threshold", props.tilt_threshold);
         });
+        this.setupSourceSelect(widget, node);
         bodyEl.appendChild(widget);
 
         // Mount interactive draggable facecam ROI box
@@ -943,9 +1271,15 @@
         widget.setAttribute("class", "node-widget");
         const currentPreset = props.preset || "pragmatic_standard";
         widget.innerHTML = `
+          <div class="node-source-row" style="margin-bottom:6px; display:flex; align-items:center; justify-content:space-between; gap:6px; background:rgba(0,0,0,0.25); padding:3px 6px; border-radius:4px;">
+            <span style="font-size:10px; color:#94a3b8; white-space:nowrap;">Stream Source:</span>
+            <select class="node-source-select" id="source-select-${node.id}" style="flex:1; max-width:140px; background:rgba(0,0,0,0.5); border:1px solid rgba(56,189,248,0.3); color:#38bdf8; font-size:10px; border-radius:4px; padding:2px 4px; cursor:pointer;">
+              <option value="auto">⚡ Auto (Wire)</option>
+            </select>
+          </div>
           <div class="widget-label">
             <span>Casino Slot Multi-Region HUD</span>
-            <span class="widget-val" id="g-spin-state-${node.id}" style="color: #94a3b8;">IDLE</span>
+            <span class="widget-val" id="g-spin-state-${node.id}" style="color: #64748b;">UNROUTED</span>
           </div>
           <div class="roi-tab-bar" id="g-tabs-${node.id}">
             <button class="roi-tab-btn active" data-target="all">👁️ All ROIs</button>
@@ -956,24 +1290,24 @@
           </div>
           <div class="node-roi-container roi-container-${node.id}">
             <img class="roi-live-img" id="g-live-img-${node.id}" style="display:none;" />
-            <div class="roi-placeholder-text" id="g-placeholder-${node.id}">Live Casino Stream (Drag Boxes to Calibrate)</div>
+            <div class="roi-placeholder-text" id="g-placeholder-${node.id}">Unrouted (Connect Video In or Assign Stream)</div>
           </div>
           <div class="gambling-hud-grid">
             <div class="hud-stat-cell">
               <div class="hud-stat-lbl">Parsed Balance</div>
-              <div class="hud-stat-val" id="g-bal-val-${node.id}">$0.00</div>
+              <div class="hud-stat-val" id="g-bal-val-${node.id}">$--</div>
             </div>
             <div class="hud-stat-cell">
               <div class="hud-stat-lbl">Active Bet Size</div>
-              <div class="hud-stat-val" id="g-bet-val-${node.id}">$0.00</div>
+              <div class="hud-stat-val" id="g-bet-val-${node.id}">$--</div>
             </div>
             <div class="hud-stat-cell">
               <div class="hud-stat-lbl">Recent Win</div>
-              <div class="hud-stat-val" id="g-win-val-${node.id}">$0.00</div>
+              <div class="hud-stat-val" id="g-win-val-${node.id}">$--</div>
             </div>
             <div class="hud-stat-cell">
               <div class="hud-stat-lbl">Multiplier</div>
-              <div class="hud-stat-val" id="g-mult-val-${node.id}">1.0x</div>
+              <div class="hud-stat-val" id="g-mult-val-${node.id}">--x</div>
             </div>
           </div>
           <div style="margin-top: 6px; display: flex; align-items: center; justify-content: space-between; gap: 6px;">
@@ -992,6 +1326,7 @@
           this.syncNodeParamDebounced(node.id, "preset", props.preset);
           this.showToast(`Switched HUD preset to ${e.target.value}`);
         });
+        this.setupSourceSelect(widget, node);
         bodyEl.appendChild(widget);
 
         // Mount interactive draggable boxes for balance, bet, win, reels
@@ -1041,6 +1376,12 @@
         const widget = document.createElement("div");
         widget.setAttribute("class", "node-widget");
         widget.innerHTML = `
+          <div class="node-source-row" style="margin-bottom:6px; display:flex; align-items:center; justify-content:space-between; gap:6px; background:rgba(0,0,0,0.25); padding:3px 6px; border-radius:4px;">
+            <span style="font-size:10px; color:#94a3b8; white-space:nowrap;">Stream Source:</span>
+            <select class="node-source-select" id="source-select-${node.id}" style="flex:1; max-width:140px; background:rgba(0,0,0,0.5); border:1px solid rgba(56,189,248,0.3); color:#38bdf8; font-size:10px; border-radius:4px; padding:2px 4px; cursor:pointer;">
+              <option value="auto">⚡ Auto (Wire)</option>
+            </select>
+          </div>
           <div class="ledger-hero-card">
             <div style="font-size: 9px; color: #94a3b8; font-weight: 700; text-transform: uppercase;">Session Net Profit / Loss</div>
             <div class="ledger-pnl-val pnl-positive" id="ledger-pnl-${node.id}">+$0.00</div>
@@ -1071,6 +1412,7 @@
             <canvas class="node-wave-canvas" id="ledger-canvas-${node.id}" width="280" height="48" style="background: rgba(0,0,0,0.5); border-radius: 4px;"></canvas>
           </div>
         `;
+        this.setupSourceSelect(widget, node);
         bodyEl.appendChild(widget);
       } else if (node.type === "CVTransformerNode") {
         const widget = document.createElement("div");
@@ -1078,18 +1420,22 @@
         const currentLabels = props.candidate_labels || "gameplay action, victory celebration, defeat game over, in-game menu, streamer facecam, brb waiting screen";
         const thresh = props.confidence_threshold !== undefined ? props.confidence_threshold : 0.70;
         widget.innerHTML = `
+          <div class="node-source-row" style="margin-bottom:6px; display:flex; align-items:center; justify-content:space-between; gap:6px; background:rgba(0,0,0,0.25); padding:3px 6px; border-radius:4px;">
+            <span style="font-size:10px; color:#94a3b8; white-space:nowrap;">Stream Source:</span>
+            <select class="node-source-select" id="source-select-${node.id}" style="flex:1; max-width:140px; background:rgba(0,0,0,0.5); border:1px solid rgba(56,189,248,0.3); color:#38bdf8; font-size:10px; border-radius:4px; padding:2px 4px; cursor:pointer;">
+              <option value="auto">⚡ Auto (Wire)</option>
+            </select>
+          </div>
           <div class="widget-label">
             <span id="cv-engine-badge-${node.id}">⚡ CoreML / ANE</span>
-            <span class="widget-val" id="cv-top-val-${node.id}">STANDBY</span>
+            <span class="widget-val" id="cv-top-val-${node.id}">UNROUTED</span>
           </div>
           <div class="cv-preview-frame">
             <img id="cv-thumb-${node.id}" class="cv-thumb-img" alt="CV Frame Preview" style="display:none;" />
-            <div id="cv-thumb-placeholder-${node.id}" class="cv-thumb-placeholder">Live Screen Frame & Bounding Boxes</div>
+            <div id="cv-thumb-placeholder-${node.id}" class="cv-thumb-placeholder">Unrouted (Connect Video In or Assign Stream)</div>
           </div>
           <div class="cv-bars-box" id="cv-bars-${node.id}">
-            <div class="cv-prob-row"><span class="cv-prob-label">gameplay action</span><div class="cv-prob-track"><div class="cv-prob-fill" style="width: 65%;"></div></div><span class="cv-prob-pct">65%</span></div>
-            <div class="cv-prob-row"><span class="cv-prob-label">victory celebration</span><div class="cv-prob-track"><div class="cv-prob-fill" style="width: 25%;"></div></div><span class="cv-prob-pct">25%</span></div>
-            <div class="cv-prob-row"><span class="cv-prob-label">streamer facecam</span><div class="cv-prob-track"><div class="cv-prob-fill" style="width: 5%;"></div></div><span class="cv-prob-pct">5%</span></div>
+            <div style="color:#475569; font-size:10px; text-align:center; padding:8px 0;">No active stream routed</div>
           </div>
           <div style="display:flex; justify-content:space-between; font-size:9px; color:#94a3b8; margin-top:4px;">
             <span id="cv-thresh-label-${node.id}">Trigger Cutoff: ≥ ${(thresh * 100).toFixed(0)}%</span>
@@ -1112,20 +1458,28 @@
           props.candidate_labels = e.target.value;
           this.syncNodeParamDebounced(node.id, "candidate_labels", props.candidate_labels);
         });
+        this.setupSourceSelect(widget, node);
         bodyEl.appendChild(widget);
       } else if (node.type === "GateEvaluatorNode") {
         const widget = document.createElement("div");
         widget.setAttribute("class", "node-widget");
         widget.innerHTML = `
+          <div class="node-source-row" style="margin-bottom:6px; display:flex; align-items:center; justify-content:space-between; gap:6px; background:rgba(0,0,0,0.25); padding:3px 6px; border-radius:4px;">
+            <span style="font-size:10px; color:#94a3b8; white-space:nowrap;">Stream Source:</span>
+            <select class="node-source-select" id="source-select-${node.id}" style="flex:1; max-width:140px; background:rgba(0,0,0,0.5); border:1px solid rgba(56,189,248,0.3); color:#38bdf8; font-size:10px; border-radius:4px; padding:2px 4px; cursor:pointer;">
+              <option value="auto">⚡ Auto (Wire)</option>
+            </select>
+          </div>
           <div class="widget-label">
             <span>Fused Multi-Modal Score</span>
             <span class="widget-val">Threshold: ≥ ${props.min_score || 4}/10</span>
           </div>
           <div class="score-gauge-box">
-            <div class="score-dial" id="gate-score-${node.id}">1</div>
-            <div class="score-status-pill" id="gate-status-${node.id}">MONITORING</div>
+            <div class="score-dial" id="gate-score-${node.id}">0</div>
+            <div class="score-status-pill" id="gate-status-${node.id}">UNROUTED</div>
           </div>
         `;
+        this.setupSourceSelect(widget, node);
         bodyEl.appendChild(widget);
       } else if (node.type === "HardwareRenderNode") {
         const widget = document.createElement("div");
@@ -1140,6 +1494,77 @@
           </div>
         `;
         bodyEl.appendChild(widget);
+      } else if (node.type === "ClipFolderNode") {
+        const widget = document.createElement("div");
+        widget.setAttribute("class", "node-widget clip-folder-widget");
+        const folderName = props.folder_name || "Highlight Reels";
+        const folderDate = props.date || new Date().toISOString().split("T")[0];
+
+        widget.innerHTML = `
+          <div class="widget-label">
+            <span style="display: flex; align-items: center; gap: 4px;">📂 Folder Storage</span>
+            <span class="widget-val" id="folder-status-${node.id}">READY</span>
+          </div>
+
+          <div style="margin-bottom: 6px;">
+            <div style="font-size: 9px; color: #94a3b8; margin-bottom: 2px; text-transform: uppercase;">Folder Name:</div>
+            <input type="text" class="node-input-text folder-name-input" id="folder-name-${node.id}" value="${folderName}" placeholder="e.g. Crazy Slots & Wins" style="width: 100%; box-sizing: border-box; background: rgba(0,0,0,0.5); border: 1px solid rgba(249, 115, 22, 0.5); border-radius: 4px; color: #fed7aa; font-weight: 700; font-size: 11px; padding: 4px 6px;" />
+          </div>
+
+          <div style="margin-bottom: 8px;">
+            <div style="font-size: 9px; color: #94a3b8; margin-bottom: 2px; text-transform: uppercase;">Folder Date:</div>
+            <input type="date" class="node-input-date folder-date-input" id="folder-date-${node.id}" value="${folderDate}" style="width: 100%; box-sizing: border-box; background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.15); border-radius: 4px; color: #f8fafc; font-size: 11px; padding: 4px 6px;" />
+          </div>
+
+          <div class="folder-stats-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 8px;">
+            <div style="background: rgba(0,0,0,0.35); padding: 6px 8px; border-radius: 4px; border: 1px solid rgba(249,115,22,0.2);">
+              <div style="font-size: 8px; color: #94a3b8; text-transform: uppercase;">Saved Clips</div>
+              <div style="font-size: 14px; font-weight: 800; color: #f97316;" id="folder-count-${node.id}">0</div>
+            </div>
+            <div style="background: rgba(0,0,0,0.35); padding: 6px 8px; border-radius: 4px; border: 1px solid rgba(56,189,248,0.2);">
+              <div style="font-size: 8px; color: #94a3b8; text-transform: uppercase;">Total Time</div>
+              <div style="font-size: 14px; font-weight: 800; color: #38bdf8;" id="folder-duration-${node.id}">0s</div>
+            </div>
+          </div>
+
+          <div style="font-size: 9px; color: #64748b; margin-bottom: 8px; line-height: 1.3;" id="folder-renderers-${node.id}">
+            🔌 <em>Connect a Hardware Video Renderer to route clips here</em>
+          </div>
+
+          <div class="folder-mini-preview" id="folder-mini-preview-${node.id}" style="display: flex; gap: 4px; overflow-x: auto; margin-bottom: 8px; min-height: 24px; padding: 2px 0;">
+            <div style="font-size: 10px; color: #475569; font-style: italic;">No clips recorded to folder yet</div>
+          </div>
+
+          <button class="folder-view-btn" id="btn-open-folder-${node.id}" style="width: 100%; display: flex; align-items: center; justify-content: center; gap: 6px; background: linear-gradient(135deg, rgba(249, 115, 22, 0.25), rgba(234, 88, 12, 0.4)); border: 1px solid #f97316; color: #fed7aa; padding: 7px 10px; border-radius: 6px; font-size: 11px; font-weight: 700; cursor: pointer; transition: all 0.2s ease;">
+            📂 Open Folder View of Clips
+          </button>
+        `;
+
+        const nameInput = widget.querySelector(`#folder-name-${node.id}`);
+        nameInput?.addEventListener("change", (e) => {
+          const val = e.target.value.trim() || "Clips";
+          node.properties = node.properties || {};
+          node.properties.folder_name = val;
+          node.title = `Clip Folder: ${val}`;
+          const titleEl = document.getElementById(`node-${node.id}`)?.querySelector(".node-title");
+          if (titleEl) titleEl.textContent = `Clip Folder: ${val}`;
+          this.syncNodeParamDebounced(node.id, "folder_name", val);
+        });
+
+        const dateInput = widget.querySelector(`#folder-date-${node.id}`);
+        dateInput?.addEventListener("change", (e) => {
+          const val = e.target.value;
+          node.properties = node.properties || {};
+          node.properties.date = val;
+          this.syncNodeParamDebounced(node.id, "date", val);
+        });
+
+        const viewBtn = widget.querySelector(`#btn-open-folder-${node.id}`);
+        viewBtn?.addEventListener("click", () => {
+          this.openFolderViewModal(node.id);
+        });
+
+        bodyEl.appendChild(widget);
       }
     }
 
@@ -1147,36 +1572,101 @@
        Real-Time Telemetry & Visual Pulses
        ------------------------------------------------------------- */
     applyTelemetry(telemetry) {
-      if (!telemetry || !this.container.classList.contains("active")) return;
+      if (!telemetry) return;
+      this.latestTelemetry = telemetry;
+      if (!this.container || !this.container.classList.contains("active")) return;
 
       const sessions = telemetry.sessions || {};
-      const targetCh = (this.selectedChannel || window.activeTab || Object.keys(sessions)[0] || "marlon").replace(/^#/, "").toLowerCase();
-      const primarySession = (targetCh && sessions[targetCh]) ? sessions[targetCh] : Object.values(sessions)[0];
-      if (!primarySession) return;
 
-      // Update Stream Source Nodes
+      // Update each node according to its routed stream source
       this.nodes.forEach((node) => {
         if (node.type === "StreamSourceNode") {
+          const nodeCh = (node.properties?.channel || "").replace(/^#/, "").toLowerCase();
+          const session = sessions[nodeCh];
           const statusEl = document.getElementById(`stream-status-${node.id}`);
           if (statusEl) {
-            const isOnline = primarySession.status === "online" || primarySession.is_buffering;
+            const isOnline = session && (session.status === "online" || session.is_buffering);
             statusEl.textContent = isOnline ? "ONLINE" : "STANDBY";
             statusEl.style.color = isOnline ? "#34d399" : "#94a3b8";
           }
           const selectEl = document.getElementById(`channel-select-${node.id}`);
-          if (selectEl && (!selectEl.options || selectEl.options.length !== Object.keys(sessions).length)) {
-            this.populateChannelSelect(selectEl, targetCh);
+          if (selectEl) {
+            this.populateChannelSelect(selectEl, nodeCh);
           }
-        } else if (node.type === "AudioMonitorNode") {
+          return;
+        }
+
+        if (node.type === "ClipFolderNode") {
+          const nodesData = telemetry.nodes || {};
+          const fData = nodesData[node.id];
+          const countEl = document.getElementById(`folder-count-${node.id}`);
+          const durEl = document.getElementById(`folder-duration-${node.id}`);
+          const rendEl = document.getElementById(`folder-renderers-${node.id}`);
+          const previewEl = document.getElementById(`folder-mini-preview-${node.id}`);
+          const statusEl = document.getElementById(`folder-status-${node.id}`);
+
+          if (fData) {
+            if (countEl) countEl.textContent = fData.clip_count;
+            if (durEl) durEl.textContent = `${fData.total_duration}s`;
+            if (statusEl) {
+              statusEl.textContent = fData.clip_count > 0 ? `${fData.clip_count} SAVED` : "READY";
+              statusEl.style.color = fData.clip_count > 0 ? "#f97316" : "#94a3b8";
+            }
+            if (rendEl) {
+              if (fData.wired_renderers && fData.wired_renderers.length > 0) {
+                rendEl.innerHTML = `🔌 <strong>Inbound:</strong> <span style="color:#38bdf8; font-weight:700;">${fData.wired_renderers.length} Renderer${fData.wired_renderers.length > 1 ? "s" : ""}</span> (${fData.wired_renderers.join(", ")})`;
+                rendEl.style.color = "#94a3b8";
+              } else {
+                rendEl.innerHTML = `🔌 <em>No renderers wired. Connect a Hardware Video Renderer to store clips here.</em>`;
+                rendEl.style.color = "#64748b";
+              }
+            }
+            if (previewEl && fData.recent_clips) {
+              if (fData.recent_clips.length === 0) {
+                previewEl.innerHTML = `<div style="font-size:10px; color:#475569; font-style:italic; padding:4px 0;">No clips recorded to folder yet</div>`;
+              } else {
+                previewEl.innerHTML = fData.recent_clips.slice(0, 5).map(c => `
+                  <div class="folder-mini-card" data-clip-id="${c.id}" style="position:relative; width:48px; height:32px; border-radius:3px; overflow:hidden; border:1px solid rgba(249,115,22,0.4); flex-shrink:0; cursor:pointer;" title="${c.title} (${c.duration}s)">
+                    <img src="${c.thumbnail_url || c.video_url}" style="width:100%; height:100%; object-fit:cover;" onerror="this.style.display='none'" />
+                    <span style="position:absolute; bottom:1px; right:2px; font-size:7px; background:rgba(0,0,0,0.8); color:#fed7aa; padding:0 2px; border-radius:2px;">${Math.round(c.duration)}s</span>
+                  </div>
+                `).join("");
+                previewEl.querySelectorAll(".folder-mini-card").forEach(el => {
+                  el.addEventListener("click", () => {
+                    this.openFolderViewModal(node.id);
+                  });
+                });
+              }
+            }
+          }
+          return;
+        }
+
+        // For all worker nodes: determine routed session via wires or explicit assignment
+        const sourceChannel = this.getNodeSourceChannel(node);
+        const sourceSelectEl = document.getElementById(`source-select-${node.id}`);
+        if (sourceSelectEl) {
+          this.populateSourceSelect(sourceSelectEl, node);
+        }
+
+        const nodeSession = sourceChannel ? sessions[sourceChannel] : null;
+
+        if (!nodeSession) {
+          this.renderUnroutedNodeState(node);
+          return;
+        }
+
+        // Route-specific telemetry updates
+        if (node.type === "AudioMonitorNode") {
           const valEl = document.getElementById(`audio-val-${node.id}`);
           const spikeTag = document.getElementById(`audio-spike-tag-${node.id}`);
           const canvas = document.getElementById(`wave-canvas-${node.id}`);
 
-          if (valEl && primarySession.audio_rms_db !== undefined) {
-            valEl.textContent = `${primarySession.audio_rms_db.toFixed(1)} dB`;
+          if (valEl && nodeSession.audio_rms_db !== undefined) {
+            valEl.textContent = `${nodeSession.audio_rms_db.toFixed(1)} dB`;
           }
 
-          if (primarySession.audio_spike) {
+          if (nodeSession.audio_spike) {
             document.getElementById(`node-${node.id}`)?.classList.add("spiking");
             if (spikeTag) {
               spikeTag.textContent = "🔥 SPIKE DETECTED";
@@ -1191,8 +1681,8 @@
             }
           }
 
-          if (canvas && primarySession.audio_waveform) {
-            this.drawNeonWaveform(canvas, primarySession.audio_waveform);
+          if (canvas && nodeSession.audio_waveform) {
+            this.drawNeonWaveform(canvas, nodeSession.audio_waveform);
           }
         } else if (node.type === "ChatVelocityNode") {
           const valEl = document.getElementById(`chat-val-${node.id}`);
@@ -1200,10 +1690,10 @@
           const ticker = document.getElementById(`chat-ticker-${node.id}`);
 
           if (valEl) {
-            valEl.textContent = `${(primarySession.v_instant || 0).toFixed(1)} msgs/s (${(primarySession.spike_ratio || 1.0).toFixed(1)}x)`;
+            valEl.textContent = `${(nodeSession.v_instant || 0).toFixed(1)} msgs/s (${(nodeSession.spike_ratio || 1.0).toFixed(1)}x)`;
           }
 
-          if (primarySession.is_spiking) {
+          if (nodeSession.is_spiking) {
             document.getElementById(`node-${node.id}`)?.classList.add("spiking");
             if (spikeTag) {
               spikeTag.textContent = "⚡ HYPE SURGE";
@@ -1218,8 +1708,8 @@
             }
           }
 
-          if (ticker && primarySession.recent_messages && primarySession.recent_messages.length) {
-            ticker.innerHTML = primarySession.recent_messages
+          if (ticker && nodeSession.recent_messages && nodeSession.recent_messages.length) {
+            ticker.innerHTML = nodeSession.recent_messages
               .slice(-4)
               .map(
                 (m) => `<div class="node-chat-msg"><span class="chat-user">${m.user}:</span><span class="chat-text">${m.text}</span></div>`
@@ -1230,29 +1720,30 @@
         } else if (node.type === "OCRVisionNode") {
           const valEl = document.getElementById(`ocr-val-${node.id}`);
           const statusEl = document.getElementById(`ocr-status-${node.id}`);
-          const slotMetrics = primarySession.slot_metrics || {};
+          const slotMetrics = nodeSession.slot_metrics || {};
           if (valEl) {
-            const mult = slotMetrics.multiplier || (primarySession.ocr_multiplier ? parseFloat(primarySession.ocr_multiplier) : 1.0);
+            const mult = slotMetrics.multiplier || (nodeSession.ocr_multiplier ? parseFloat(nodeSession.ocr_multiplier) : 1.0);
             const tier = slotMetrics.win_tier || "BASE";
             const pnl = slotMetrics.net_pnl !== undefined
               ? (slotMetrics.net_pnl >= 0 ? `+$${slotMetrics.net_pnl.toFixed(2)}` : `-$${Math.abs(slotMetrics.net_pnl).toFixed(2)}`)
-              : (primarySession.ocr_balance || "$0.00");
+              : (nodeSession.ocr_balance || "$0.00");
             valEl.textContent = `${typeof mult === 'number' ? mult.toFixed(1) : mult}x (${pnl})`;
-            if (tier !== "BASE" && statusEl) {
-              statusEl.textContent = tier.replace("_", " ");
+            valEl.style.color = "#38bdf8";
+            if (statusEl) {
+              statusEl.textContent = tier !== "BASE" ? tier.replace("_", " ") : "MONITORING";
               statusEl.style.color = slotMetrics.is_big_win ? "#fbbf24" : "#10b981";
             }
           }
           const ocrImg = document.getElementById(`ocr-live-img-${node.id}`);
           const ocrPlaceholder = document.getElementById(`ocr-placeholder-${node.id}`);
-          const frameB64 = primarySession.stream_frame_b64 || primarySession.cv_thumbnail_b64;
+          const frameB64 = nodeSession.stream_frame_b64 || nodeSession.cv_thumbnail_b64;
           if (ocrImg && frameB64) {
             ocrImg.src = frameB64;
             ocrImg.style.display = "block";
             if (ocrPlaceholder) ocrPlaceholder.style.display = "none";
           }
           const listEl = document.getElementById(`ocr-node-list-${node.id}`);
-          const extracted = primarySession.ocr_extracted_areas || primarySession.dynamic_ocr_areas || [];
+          const extracted = nodeSession.ocr_extracted_areas || nodeSession.dynamic_ocr_areas || [];
           if (listEl && extracted.length > 0) {
             listEl.innerHTML = extracted.map(a => `
               <div style="display:flex; justify-content:space-between; align-items:center; background:rgba(255,255,255,0.04); border-left:3px solid ${a.color || '#38bdf8'}; border-radius:4px; padding:3px 6px; font-size:10px;">
@@ -1272,19 +1763,21 @@
           const valenceInd = document.getElementById(`face-valence-ind-${node.id}`);
           const barsBox = document.getElementById(`face-bars-${node.id}`);
 
-          const frameB64 = primarySession.stream_frame_b64 || primarySession.cv_thumbnail_b64;
+          const frameB64 = nodeSession.stream_frame_b64 || nodeSession.cv_thumbnail_b64;
           if (faceImg && frameB64) {
             faceImg.src = frameB64;
             faceImg.style.display = "block";
             if (facePlaceholder) facePlaceholder.style.display = "none";
           }
 
-          if (primarySession.emotion_tilt !== undefined) {
-            const tilt = primarySession.emotion_tilt;
-            if (tiltNum) tiltNum.textContent = tilt.toFixed(1);
-            if (topVal) topVal.textContent = (primarySession.emotion_top || "neutral").toUpperCase();
-            if (euphoriaVal && primarySession.emotion_euphoria !== undefined) {
-              euphoriaVal.textContent = `${primarySession.emotion_euphoria.toFixed(0)}%`;
+          if (nodeSession.emotion_tilt !== undefined) {
+            const tilt = nodeSession.emotion_tilt;
+            if (tiltNum) {
+              tiltNum.textContent = tilt.toFixed(1);
+            }
+            if (topVal) topVal.textContent = (nodeSession.emotion_top || "neutral").toUpperCase();
+            if (euphoriaVal && nodeSession.emotion_euphoria !== undefined) {
+              euphoriaVal.textContent = `${nodeSession.emotion_euphoria.toFixed(0)}%`;
             }
 
             let tiltColor = "#34d399";
@@ -1300,7 +1793,7 @@
               tiltPill.style.background = `${tiltColor}22`;
             }
 
-            if (primarySession.is_tilting) {
+            if (nodeSession.is_tilting) {
               document.getElementById(`node-${node.id}`)?.classList.add("spiking");
               this.pulseWiresFromNode(node.id);
             } else {
@@ -1308,17 +1801,17 @@
             }
           }
 
-          if (primarySession.emotion_valence !== undefined) {
-            if (valenceVal) valenceVal.textContent = (primarySession.emotion_valence > 0 ? "+" : "") + primarySession.emotion_valence.toFixed(2);
+          if (nodeSession.emotion_valence !== undefined) {
+            if (valenceVal) valenceVal.textContent = (nodeSession.emotion_valence > 0 ? "+" : "") + nodeSession.emotion_valence.toFixed(2);
             if (valenceInd) {
-              const pct = Math.max(5, Math.min(95, ((primarySession.emotion_valence + 1.0) / 2.0) * 100));
+              const pct = Math.max(5, Math.min(95, ((nodeSession.emotion_valence + 1.0) / 2.0) * 100));
               valenceInd.style.left = `${pct}%`;
-              valenceInd.style.background = primarySession.emotion_valence >= 0 ? "#34d399" : "#ef4444";
+              valenceInd.style.background = nodeSession.emotion_valence >= 0 ? "#34d399" : "#ef4444";
             }
           }
 
-          if (barsBox && primarySession.emotion_distribution) {
-            const dist = primarySession.emotion_distribution;
+          if (barsBox && nodeSession.emotion_distribution) {
+            const dist = nodeSession.emotion_distribution;
             const barColors = { joy: "#34d399", rage: "#ef4444", shock: "#f59e0b", despair: "#a855f7", neutral: "#64748b" };
             barsBox.innerHTML = Object.entries(dist).map(([emo, val]) => `
               <div class="cv-prob-row">
@@ -1337,38 +1830,38 @@
           const winVal = document.getElementById(`g-win-val-${node.id}`);
           const multVal = document.getElementById(`g-mult-val-${node.id}`);
 
-          const frameB64 = primarySession.stream_frame_b64 || primarySession.cv_thumbnail_b64;
+          const frameB64 = nodeSession.stream_frame_b64 || nodeSession.cv_thumbnail_b64;
           if (gImg && frameB64) {
             gImg.src = frameB64;
             gImg.style.display = "block";
             if (gPlaceholder) gPlaceholder.style.display = "none";
           }
 
-          if (balVal && primarySession.gambling_balance !== undefined) {
-            balVal.textContent = `$${Number(primarySession.gambling_balance).toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
+          if (balVal && nodeSession.gambling_balance !== undefined) {
+            balVal.textContent = `$${Number(nodeSession.gambling_balance).toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
           }
-          if (betVal && primarySession.gambling_bet !== undefined) {
-            betVal.textContent = `$${Number(primarySession.gambling_bet).toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
+          if (betVal && nodeSession.gambling_bet !== undefined) {
+            betVal.textContent = `$${Number(nodeSession.gambling_bet).toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
           }
-          if (winVal && primarySession.gambling_win !== undefined) {
-            winVal.textContent = `$${Number(primarySession.gambling_win).toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
+          if (winVal && nodeSession.gambling_win !== undefined) {
+            winVal.textContent = `$${Number(nodeSession.gambling_win).toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
           }
-          if (multVal && primarySession.gambling_multiplier !== undefined) {
-            multVal.textContent = primarySession.gambling_multiplier ? `${primarySession.gambling_multiplier.toFixed(1)}x` : "1.0x";
+          if (multVal && nodeSession.gambling_multiplier !== undefined) {
+            multVal.textContent = nodeSession.gambling_multiplier ? `${nodeSession.gambling_multiplier.toFixed(1)}x` : "1.0x";
           }
-          if (spinBadge && primarySession.gambling_spin_state) {
-            spinBadge.textContent = primarySession.gambling_spin_state;
-            if (primarySession.gambling_spin_state === "WIN_CELEBRATION") {
+          if (spinBadge && nodeSession.gambling_spin_state) {
+            spinBadge.textContent = nodeSession.gambling_spin_state;
+            if (nodeSession.gambling_spin_state === "WIN_CELEBRATION") {
               spinBadge.style.color = "#f59e0b";
               this.pulseWiresFromNode(node.id);
-            } else if (primarySession.gambling_spin_state === "SPINNING") {
+            } else if (nodeSession.gambling_spin_state === "SPINNING") {
               spinBadge.style.color = "#38bdf8";
             } else {
               spinBadge.style.color = "#94a3b8";
             }
           }
         } else if (node.type === "GamblingLedgerNode") {
-          const ledger = primarySession.gambling_ledger || {};
+          const ledger = nodeSession.gambling_ledger || {};
           const pnlEl = document.getElementById(`ledger-pnl-${node.id}`);
           const chaseBadge = document.getElementById(`ledger-chase-badge-${node.id}`);
           const winrateEl = document.getElementById(`ledger-winrate-${node.id}`);
@@ -1413,37 +1906,47 @@
           const thumbPlaceholder = document.getElementById(`cv-thumb-placeholder-${node.id}`);
           const barsBox = document.getElementById(`cv-bars-${node.id}`);
 
-          if (primarySession.cv_top_label) {
+          const frameB64 = nodeSession.cv_thumbnail_b64 || nodeSession.stream_frame_b64;
+          if (thumbImg && frameB64) {
+            thumbImg.src = frameB64;
+            thumbImg.style.display = "block";
+            if (thumbPlaceholder) thumbPlaceholder.style.display = "none";
+          }
+
+          if (nodeSession.cv_top_label) {
             if (topValEl) {
-              topValEl.textContent = `${primarySession.cv_top_label.toUpperCase()} (${(primarySession.cv_confidence * 100).toFixed(0)}%)`;
-              topValEl.style.color = primarySession.cv_confidence >= 0.70 ? "#34d399" : "#38bdf8";
+              topValEl.textContent = `${nodeSession.cv_top_label.toUpperCase()} (${(nodeSession.cv_confidence * 100).toFixed(0)}%)`;
+              topValEl.style.color = nodeSession.cv_confidence >= 0.70 ? "#34d399" : "#38bdf8";
             }
-            if (latencyTag && primarySession.cv_latency_ms) {
-              latencyTag.textContent = `⚡ ${primarySession.cv_latency_ms.toFixed(1)} ms`;
+          } else if (frameB64) {
+            if (topValEl) {
+              topValEl.textContent = "PROCESSING...";
+              topValEl.style.color = "#38bdf8";
             }
-            if (thumbImg && primarySession.cv_thumbnail_b64) {
-              thumbImg.src = primarySession.cv_thumbnail_b64;
-              thumbImg.style.display = "block";
-              if (thumbPlaceholder) thumbPlaceholder.style.display = "none";
-            }
-            if (barsBox && primarySession.cv_probabilities) {
-              const sorted = Object.entries(primarySession.cv_probabilities).sort((a, b) => b[1] - a[1]).slice(0, 3);
-              barsBox.innerHTML = sorted.map(([label, prob]) => `
-                <div class="cv-prob-row">
-                  <span class="cv-prob-label">${label}</span>
-                  <div class="cv-prob-track"><div class="cv-prob-fill" style="width: ${Math.round(prob * 100)}%;"></div></div>
-                  <span class="cv-prob-pct">${Math.round(prob * 100)}%</span>
-                </div>
-              `).join("");
-            }
-            if (primarySession.cv_confidence >= 0.75) {
-              this.pulseWiresFromNode(node.id);
-            }
+          }
+
+          if (latencyTag && nodeSession.cv_latency_ms) {
+            latencyTag.textContent = `⚡ ${nodeSession.cv_latency_ms.toFixed(1)} ms`;
+          }
+
+          if (barsBox && nodeSession.cv_probabilities && Object.keys(nodeSession.cv_probabilities).length > 0) {
+            const sorted = Object.entries(nodeSession.cv_probabilities).sort((a, b) => b[1] - a[1]).slice(0, 3);
+            barsBox.innerHTML = sorted.map(([label, prob]) => `
+              <div class="cv-prob-row">
+                <span class="cv-prob-label">${label}</span>
+                <div class="cv-prob-track"><div class="cv-prob-fill" style="width: ${Math.round(prob * 100)}%;"></div></div>
+                <span class="cv-prob-pct">${Math.round(prob * 100)}%</span>
+              </div>
+            `).join("");
+          }
+
+          if (nodeSession.cv_confidence >= 0.75) {
+            this.pulseWiresFromNode(node.id);
           }
         } else if (node.type === "GateEvaluatorNode") {
           const scoreEl = document.getElementById(`gate-score-${node.id}`);
           const statusEl = document.getElementById(`gate-status-${node.id}`);
-          const score = primarySession.spike_ratio > 3.0 || primarySession.audio_spike ? 8 : 1;
+          const score = nodeSession.spike_ratio > 3.0 || nodeSession.audio_spike ? 8 : 1;
 
           if (scoreEl) scoreEl.textContent = score;
           if (statusEl) {
@@ -1684,6 +2187,249 @@
     }
 
     /* -------------------------------------------------------------
+       Folder View of Clips Modal
+       ------------------------------------------------------------- */
+    async openFolderViewModal(nodeId) {
+      const node = this.nodes.get(nodeId);
+      const folderName = node?.properties?.folder_name || "Highlight Reels";
+      const folderDate = node?.properties?.date || new Date().toISOString().split("T")[0];
+
+      let modal = document.getElementById("clip-folder-modal");
+      if (!modal) {
+        modal = document.createElement("div");
+        modal.id = "clip-folder-modal";
+        modal.className = "folder-view-modal";
+        modal.innerHTML = `
+          <div class="folder-view-window">
+            <div class="folder-view-header">
+              <div class="folder-view-title-group">
+                <span style="font-size: 24px;">📂</span>
+                <div>
+                  <div class="folder-view-title" id="fview-title">${folderName}</div>
+                  <div class="folder-view-meta">
+                    <span class="fview-pill fview-date" id="fview-date-tag">📅 ${folderDate}</span>
+                    <span class="fview-pill fview-count" id="fview-stats-tag">0 clips</span>
+                    <span class="fview-pill fview-renderers" id="fview-renderers-tag" style="display: none;"></span>
+                  </div>
+                </div>
+              </div>
+              <div class="folder-view-controls">
+                <input type="text" id="fview-search-input" class="fview-search" placeholder="🔍 Filter clips..." />
+                <button class="studio-btn" id="fview-refresh-btn" title="Refresh clips">🔄 Refresh</button>
+                <button class="studio-btn" id="fview-close-btn" style="padding: 6px 12px; font-weight: 800;">✕</button>
+              </div>
+            </div>
+
+            <!-- Inline Clip Player Area (hidden until a clip is played) -->
+            <div class="folder-active-player" id="fview-active-player" style="display: none;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                <span style="font-size: 13px; font-weight: 700; color: #fed7aa;" id="fview-player-title">Now Playing</span>
+                <button class="studio-btn" id="fview-player-close" style="font-size: 10px; padding: 2px 8px;">✕ Close Player</button>
+              </div>
+              <video id="fview-video" controls autoplay playsinline style="width: 100%; max-height: 420px; border-radius: 8px; background: #000; outline: none; box-shadow: 0 8px 24px rgba(0,0,0,0.7);"></video>
+            </div>
+
+            <div class="folder-view-body" id="fview-clips-grid">
+              <div class="fview-loading">Loading folder clips...</div>
+            </div>
+          </div>
+        `;
+        document.body.appendChild(modal);
+
+        modal.querySelector("#fview-close-btn")?.addEventListener("click", () => {
+          modal.classList.remove("active");
+          const v = modal.querySelector("#fview-video");
+          if (v) { v.pause(); v.src = ""; }
+        });
+
+        modal.querySelector("#fview-player-close")?.addEventListener("click", () => {
+          const p = modal.querySelector("#fview-active-player");
+          const v = modal.querySelector("#fview-video");
+          if (p) p.style.display = "none";
+          if (v) { v.pause(); v.src = ""; }
+        });
+
+        modal.addEventListener("click", (e) => {
+          if (e.target === modal) {
+            modal.classList.remove("active");
+            const v = modal.querySelector("#fview-video");
+            if (v) { v.pause(); v.src = ""; }
+          }
+        });
+      }
+
+      // Update header details for this specific folder node
+      modal.querySelector("#fview-title").textContent = folderName;
+      modal.querySelector("#fview-date-tag").textContent = `📅 ${folderDate}`;
+
+      // Check wired renderers
+      const wiredRenderers = [];
+      this.wires.forEach(w => {
+        if (w.to.split(":")[0] === nodeId) {
+          const srcId = w.from.split(":")[0];
+          const srcNode = this.nodes.get(srcId);
+          if (srcNode && srcNode.type === "HardwareRenderNode") {
+            wiredRenderers.push(srcNode.title || srcId);
+          }
+        }
+      });
+      const rendTag = modal.querySelector("#fview-renderers-tag");
+      if (rendTag) {
+        if (wiredRenderers.length > 0) {
+          rendTag.textContent = `🔌 ${wiredRenderers.length} Renderers (${wiredRenderers.join(", ")})`;
+          rendTag.style.display = "inline-flex";
+        } else {
+          rendTag.style.display = "none";
+        }
+      }
+
+      modal.classList.add("active");
+
+      // Load clips from backend API
+      const loadClips = async () => {
+        const grid = modal.querySelector("#fview-clips-grid");
+        if (!grid) return;
+        grid.innerHTML = '<div class="fview-loading">Loading folder clips...</div>';
+
+        try {
+          const res = await fetch(`/api/folders/${encodeURIComponent(nodeId)}/clips`);
+          let clips = [];
+          if (res.ok) {
+            clips = await res.json();
+          } else {
+            // Fallback: fetch all and filter client side
+            const allRes = await fetch("/api/clips?limit=100");
+            if (allRes.ok) {
+              const allClips = await allRes.json();
+              clips = allClips.filter(c => c.folder_id === nodeId);
+            }
+          }
+
+          modal.querySelector("#fview-stats-tag").textContent = `${clips.length} clip${clips.length !== 1 ? "s" : ""}`;
+
+          const renderGrid = (filterTerm = "") => {
+            const term = filterTerm.trim().toLowerCase();
+            const filtered = clips.filter(c => {
+              if (!term) return true;
+              return (
+                (c.suggested_title && c.suggested_title.toLowerCase().includes(term)) ||
+                (c.channel_name && c.channel_name.toLowerCase().includes(term)) ||
+                (c.id && c.id.toLowerCase().includes(term))
+              );
+            });
+
+            if (filtered.length === 0) {
+              grid.innerHTML = `
+                <div class="fview-empty">
+                  <div style="font-size: 42px; margin-bottom: 8px;">📂</div>
+                  <div style="font-weight: 700; font-size: 14px; color: #cbd5e1; margin-bottom: 4px;">
+                    ${clips.length === 0 ? "No Clips In This Folder Yet" : "No Clips Matching Filter"}
+                  </div>
+                  <div style="font-size: 11px; color: #64748b; max-width: 380px; text-align: center; line-height: 1.5;">
+                    ${clips.length === 0 ? "Route the finished output of any Hardware Video Renderer into this Clip Folder node. Triggered highlight clips will automatically be stored here." : "Try clearing your search query to see all clips."}
+                  </div>
+                </div>
+              `;
+              return;
+            }
+
+            grid.innerHTML = filtered.map(c => {
+              const duration = c.duration_seconds ? `${Number(c.duration_seconds).toFixed(1)}s` : "--";
+              const score = c.heuristic_score || 0;
+              const dateStr = c.created_at ? new Date(c.created_at).toLocaleString() : "";
+              const thumb = c.thumbnail_url || c.video_url;
+              return `
+                <div class="fview-clip-card" data-id="${c.id}">
+                  <div class="fview-card-thumb">
+                    <img src="${thumb}" alt="${c.suggested_title || 'Clip'}" onerror="this.src='/static/icons/video_placeholder.png'" />
+                    <div class="fview-play-badge" data-video="${c.video_url}" data-title="${c.suggested_title || 'Stream Clip'}">▶ Play</div>
+                    <span class="fview-dur-pill">${duration}</span>
+                    <span class="fview-score-pill">★ ${score}</span>
+                  </div>
+                  <div class="fview-card-body">
+                    <div class="fview-clip-title" title="${c.suggested_title || 'Stream Clip'}">${c.suggested_title || 'Stream Highlight Clip'}</div>
+                    <div class="fview-clip-meta">
+                      <span class="fview-ch-badge">#${c.channel_name || 'stream'}</span>
+                      <span class="fview-date">${dateStr}</span>
+                    </div>
+                    <div class="fview-card-actions">
+                      <button class="fview-action-btn play-btn" data-video="${c.video_url}" data-title="${c.suggested_title || 'Stream Clip'}">▶ Watch</button>
+                      <a href="${c.video_url}" download class="fview-action-btn download-btn">⬇ MP4</a>
+                      <button class="fview-action-btn delete-btn" data-id="${c.id}" title="Delete clip">🗑</button>
+                    </div>
+                  </div>
+                </div>
+              `;
+            }).join("");
+
+            // Play button handlers
+            grid.querySelectorAll(".play-btn, .fview-play-badge").forEach(btn => {
+              btn.addEventListener("click", () => {
+                const videoUrl = btn.getAttribute("data-video");
+                const clipTitle = btn.getAttribute("data-title");
+                const player = modal.querySelector("#fview-active-player");
+                const videoEl = modal.querySelector("#fview-video");
+                const titleEl = modal.querySelector("#fview-player-title");
+                if (player && videoEl && videoUrl) {
+                  titleEl.textContent = `▶ ${clipTitle}`;
+                  videoEl.src = videoUrl;
+                  player.style.display = "block";
+                  videoEl.play().catch(() => {});
+                  player.scrollIntoView({ behavior: "smooth" });
+                }
+              });
+            });
+
+            // Delete clip handlers
+            grid.querySelectorAll(".delete-btn").forEach(btn => {
+              btn.addEventListener("click", async (e) => {
+                e.stopPropagation();
+                const cid = btn.getAttribute("data-id");
+                if (!cid) return;
+                if (!confirm("Are you sure you want to delete this clip from the folder and disk?")) return;
+                try {
+                  const delRes = await fetch(`/api/clips/${encodeURIComponent(cid)}`, { method: "DELETE" });
+                  if (delRes.ok) {
+                    this.showToast("Clip deleted successfully");
+                    await loadClips();
+                  } else {
+                    alert("Failed to delete clip");
+                  }
+                } catch (err) {
+                  console.error("Delete clip error:", err);
+                }
+              });
+            });
+          };
+
+          renderGrid();
+
+          // Hook up search filter input
+          const searchInput = modal.querySelector("#fview-search-input");
+          if (searchInput) {
+            searchInput.value = "";
+            searchInput.oninput = (e) => {
+              renderGrid(e.target.value);
+            };
+          }
+        } catch (e) {
+          console.error("Error loading folder clips:", e);
+          grid.innerHTML = `<div class="fview-empty" style="color: #ef4444;">Failed to load clips: ${e.message}</div>`;
+        }
+      };
+
+      // Refresh button
+      const refreshBtn = modal.querySelector("#fview-refresh-btn");
+      if (refreshBtn) {
+        refreshBtn.onclick = () => {
+          loadClips();
+        };
+      }
+
+      loadClips();
+    }
+
+    /* -------------------------------------------------------------
        Floating Toolbar & Spawn Palette
        ------------------------------------------------------------- */
     initToolbar() {
@@ -1850,6 +2596,9 @@
       } else if (type === "HardwareRenderNode") {
         inputs = [{ id: "candidate_in", name: "Candidate In", type: "video" }];
         outputs = [{ id: "clip_asset", name: "Finished Clip", type: "clip" }];
+      } else if (type === "ClipFolderNode") {
+        inputs = [{ id: "clip_in", name: "Clip In", type: "clip" }];
+        outputs = [];
       }
 
       const newNode = {
@@ -1858,21 +2607,37 @@
         title: catalogItem ? catalogItem.title : type,
         category: catalogItem ? catalogItem.category : "stream",
         position: [x, y],
-        properties: {},
+        properties: {
+          channel: type === "StreamSourceNode" ? (this.selectedChannel || window.activeTab || "marlon") : "auto",
+        },
         inputs: inputs,
         outputs: outputs,
       };
 
+      if (type === "ClipFolderNode") {
+        newNode.title = "Clip Folder: Highlight Reels";
+        newNode.properties = {
+          folder_name: "Highlight Reels",
+          date: new Date().toISOString().split("T")[0],
+        };
+      }
+
       this.nodes.set(newId, newNode);
       this.renderNodeDOM(newNode);
+      if (type !== "StreamSourceNode" && type !== "ClipFolderNode") {
+        this.renderUnroutedNodeState(newNode);
+      }
       this.renderWires();
       this.syncGraphDebounced();
+      if (this.latestTelemetry) {
+        this.applyTelemetry(this.latestTelemetry);
+      }
     }
 
     autoLayout() {
       // Clean left-to-right columnar alignment
-      let streamX = 60, col2X = 460, col3X = 860, col4X = 1240, col5X = 1600;
-      let yCounters = { col1: 140, col2: 60, col3: 160, col4: 160, col5: 160 };
+      let streamX = 60, col2X = 460, col3X = 860, col4X = 1240, col5X = 1600, col6X = 1960;
+      let yCounters = { col1: 140, col2: 60, col3: 160, col4: 160, col5: 160, col6: 160 };
 
       this.nodes.forEach((node) => {
         if (node.type === "StreamSourceNode") {
@@ -1887,6 +2652,12 @@
         } else if (node.type === "SegmentSlicerNode") {
           node.position = [col4X, yCounters.col4];
           yCounters.col4 += 200;
+        } else if (node.type === "HardwareRenderNode") {
+          node.position = [col5X, yCounters.col5];
+          yCounters.col5 += 200;
+        } else if (node.type === "ClipFolderNode") {
+          node.position = [col6X, yCounters.col6];
+          yCounters.col6 += 260;
         } else {
           node.position = [col5X, yCounters.col5];
           yCounters.col5 += 200;
@@ -1913,18 +2684,42 @@
 
         (data.nodes || []).forEach((n) => {
           if (n.type === "StreamSourceNode") {
-            const ch = (this.selectedChannel || window.activeTab || n.properties?.channel || "marlon").replace(/^#/, "").toLowerCase();
+            const ch = (n.properties?.channel || this.selectedChannel || window.activeTab || "marlon").replace(/^#/, "").toLowerCase();
+            const plat = (n.properties?.platform || (ch.includes("kick") ? "kick" : "twitch")).toLowerCase();
+            const platLabel = plat === "kick" ? "Kick" : "Twitch";
             n.properties = n.properties || {};
             n.properties.channel = ch;
-            n.title = `Twitch Source: #${ch}`;
+            n.properties.platform = plat;
+            n.title = `${platLabel} Source: #${ch}`;
           }
           this.nodes.set(n.id, n);
           this.renderNodeDOM(n);
         });
 
+        // Initialize state for each node (unrouted if no session)
+        if (window.latestTelemetry) {
+          this.applyTelemetry(window.latestTelemetry);
+        } else {
+          this.nodes.forEach((n) => {
+            if (n.type !== "StreamSourceNode") {
+              this.renderUnroutedNodeState(n);
+            }
+          });
+        }
+
         this.updateTransform();
       } catch (err) {
         console.warn("[NodeStudio] Failed to load graph from backend:", err);
+      }
+    }
+
+    async handleStreamAdded(channel, platform = "twitch", autoSequence = true) {
+      this.selectedChannel = (channel || "").replace(/^#/, "").toLowerCase();
+      await this.loadGraph();
+      if (autoSequence) {
+        this.showToast(`⚡ Auto-generated clipping DAG for #${this.selectedChannel}`);
+      } else {
+        this.showToast(`🔧 Added #${this.selectedChannel} stream source (manual wiring ready)`);
       }
     }
 
