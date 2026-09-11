@@ -237,6 +237,11 @@ class KickChatVelocityEngine:
     def stop(self):
         """Stops the chat velocity engine."""
         self.running = False
-        if self.ws and not self.ws.closed:
-            asyncio.create_task(self.ws.close())
+        if self.ws:
+            try:
+                loop = asyncio.get_running_loop()
+                if loop.is_running() and not getattr(self.ws, "closed", False):
+                    loop.create_task(self.ws.close())
+            except RuntimeError:
+                pass
         logger.info("[KickChat:%s] Stopped Kick chat velocity engine.", self.channel)

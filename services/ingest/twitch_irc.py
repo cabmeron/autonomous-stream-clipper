@@ -168,4 +168,10 @@ class TwitchChatVelocityEngine:
     def stop(self):
         self.running = False
         if self.ws:
-            asyncio.create_task(self.ws.close())
+            try:
+                loop = asyncio.get_running_loop()
+                if loop.is_running() and not getattr(self.ws, "closed", False):
+                    loop.create_task(self.ws.close())
+            except RuntimeError:
+                pass
+

@@ -9,7 +9,7 @@ import sys
 import threading
 import time
 from collections import deque
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 from dotenv import load_dotenv
 from aiohttp import web
 
@@ -424,8 +424,11 @@ class StreamClipperOrchestrator:
 
     def __init__(self):
         self.running = False
+        self._shutting_down = False
         self.loop: Optional[asyncio.AbstractEventLoop] = None
         self.http_runner: Optional[web.AppRunner] = None
+        self._background_tasks: Set[asyncio.Task] = set()
+        self._main_gather_task: Optional[asyncio.Future] = None
 
         # Registry of active channel sessions: channel_name -> StreamSession
         self.sessions: Dict[str, StreamSession] = {}
@@ -455,6 +458,23 @@ class StreamClipperOrchestrator:
         telemetry_server.sessions_telemetry_provider = self.get_all_telemetry
         telemetry_server.active_jobs_provider = self.get_active_jobs
         telemetry_server.node_telemetry_provider = self.graph_manager.get_node_telemetry_payload
+
+    def _track_task(self, coro_or_task) -> Optional[asyncio.Task]:
+        """Spawns or tracks an asyncio task, adding automatic cleanup and shutdown tracking."""
+        if self._shutting_down:
+            if asyncio.iscoroutine(coro_or_task):
+                coro_or_task.close()
+            return None
+        try:
+            task = asyncio.create_task(coro_or_task) if asyncio.iscoroutine(coro_or_task) else coro_or_task
+        except RuntimeError:
+            if asyncio.iscoroutine(coro_or_task):
+                coro_or_task.close()
+            return None
+
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
+        return task
 
     def create_job(self, channel: str, context: dict) -> str:
         """Instantiates a new tracked clipping pipeline job with real-time step progress and logs."""
@@ -693,7 +713,7 @@ class StreamClipperOrchestrator:
         context["job_id"] = job_id
 
         # Dispatch clipping DAG in a non-blocking background task
-        asyncio.create_task(self.process_clip_trigger(session, context))
+        self._track_task(self.process_clip_trigger(session, context))
 
         logger.info("[Orchestrator] Manual 60s clip initiated for #%s (job: %s)", clean, job_id)
         return {
@@ -871,7 +891,7 @@ class StreamClipperOrchestrator:
                         if now - session.last_descriptor_time >= session.chat_descriptor_service.interval_seconds:
                             session.last_descriptor_time = now
                             msgs = session.chat_engine.drain_window_messages()
-                            asyncio.create_task(
+                            self._track_task(
                                 self._run_chat_descriptor(
                                     session, msgs, now - session.chat_descriptor_service.interval_seconds, now
                                 )
@@ -1640,6 +1660,7 @@ class StreamClipperOrchestrator:
     async def run(self):
         """Initializes and runs all pipeline services locally."""
         self.running = True
+        self._shutting_down = False
         self.loop = asyncio.get_running_loop()
 
         logger.info("=" * 70)
@@ -1671,7 +1692,8 @@ class StreamClipperOrchestrator:
 
         try:
             import websockets
-            await websockets.serve(
+            telemetry_server.running = True
+            telemetry_server.ws_server = await websockets.serve(
                 telemetry_server.ws_handler,
                 "0.0.0.0",
                 telemetry_server.PORT,
@@ -1680,29 +1702,60 @@ class StreamClipperOrchestrator:
             )
             logger.info("[Telemetry] WebSocket active on ws://0.0.0.0:%d", telemetry_server.PORT)
 
-            await asyncio.gather(
+            self._main_gather_task = asyncio.gather(
                 telemetry_server.broadcast_loop(),
                 self.heuristics_polling_loop(),
             )
+            await self._main_gather_task
         except asyncio.CancelledError:
             pass
         finally:
             await self.shutdown()
 
     async def shutdown(self):
-        """Gracefully stops all background sessions."""
-        if not self.running:
+        """Gracefully stops all background sessions, servers, and tasks."""
+        if self._shutting_down:
             return
+        self._shutting_down = True
         logger.info("[Orchestrator] Halting local clipper sessions (%d active)...", len(self.sessions))
         self.running = False
+
+        # 1. Stop all stream sessions (kills ffmpeg/streamlink subprocesses and chat websockets)
         for session in list(self.sessions.values()):
             session.stop()
         self.sessions.clear()
+
+        # 2. Cancel and await main gather task and background tasks
+        if self._main_gather_task and not self._main_gather_task.done():
+            self._main_gather_task.cancel()
+
+        for task in list(self._background_tasks):
+            if not task.done():
+                task.cancel()
+        if self._background_tasks:
+            await asyncio.gather(*self._background_tasks, return_exceptions=True)
+            self._background_tasks.clear()
+
+        # 3. Stop Telemetry WebSocket server and close client connections
+        try:
+            await telemetry_server.stop()
+        except Exception as e:
+            logger.debug("[Orchestrator] Telemetry stop error: %s", e)
+
+        # 4. Cleanup aiohttp web server
         if self.http_runner:
             try:
                 await self.http_runner.cleanup()
-            except Exception:
-                pass
+                self.http_runner = None
+            except Exception as e:
+                logger.debug("[Orchestrator] HTTP runner cleanup error: %s", e)
+
+        # 5. Checkpoint and close database
+        try:
+            self.db.close()
+        except Exception as e:
+            logger.debug("[Orchestrator] DB close error: %s", e)
+
         logger.info("[Orchestrator] Shutdown complete.")
 
 
@@ -1710,6 +1763,7 @@ if __name__ == "__main__":
     orchestrator = StreamClipperOrchestrator()
     try:
         asyncio.run(orchestrator.run())
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, SystemExit):
         logger.info("Local clipper halted.")
-        sys.exit(0)
+    except Exception as e:
+        logger.error("Local clipper crashed: %s", e)

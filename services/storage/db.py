@@ -302,3 +302,12 @@ class DatabaseRepository:
             rows = cursor.fetchall()
             return [dict(r) for r in rows]
 
+    def close(self):
+        """Flushes SQLite WAL log and executes checkpoint to cleanly close the database."""
+        try:
+            with self._get_connection() as conn:
+                conn.execute("PRAGMA wal_checkpoint(TRUNCATE);")
+            logger.info("[Database] SQLite WAL checkpointed and closed cleanly.")
+        except Exception as e:
+            logger.debug("[Database] Error during WAL checkpoint: %s", e)
+

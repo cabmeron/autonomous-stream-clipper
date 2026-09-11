@@ -14,6 +14,8 @@ logger = logging.getLogger("telemetry")
 
 PORT = int(os.getenv("TELEMETRY_PORT", 8765))
 CLIENTS: Set[websockets.WebSocketServerProtocol] = set()
+running: bool = True
+ws_server = None
 
 # Global provider function registered by Orchestrator: returns Dict[str, dict]
 sessions_telemetry_provider: Optional[Callable[[], Dict[str, dict]]] = None
@@ -34,8 +36,8 @@ def notify_new_clip(clip_summary: dict):
 
 async def broadcast_loop():
     """Broadcasts multi-session telemetry metrics to all connected clients."""
-    global recent_clip_notification
-    while True:
+    global recent_clip_notification, running
+    while running:
         try:
             if not CLIENTS:
                 await asyncio.sleep(0.25)
@@ -97,10 +99,35 @@ async def ws_handler(websocket):
         logger.info("[Telemetry] Client disconnected (%d total)", len(CLIENTS))
 
 
+async def stop():
+    """Closes all active websocket clients and shuts down the websocket server."""
+    global running, ws_server
+    running = False
+    if CLIENTS:
+        logger.info("[Telemetry] Closing %d active client connection(s)...", len(CLIENTS))
+        close_tasks = [c.close() for c in list(CLIENTS)]
+        await asyncio.gather(*close_tasks, return_exceptions=True)
+        CLIENTS.clear()
+    if ws_server is not None:
+        logger.info("[Telemetry] Closing WebSocket server...")
+        ws_server.close()
+        try:
+            await ws_server.wait_closed()
+        except Exception:
+            pass
+        ws_server = None
+    logger.info("[Telemetry] WebSocket server stopped cleanly.")
+
+
 async def main():
+    global ws_server, running
+    running = True
     logger.info("[Telemetry] Starting WebSocket server on ws://0.0.0.0:%d (multi-session mode)", PORT)
-    async with websockets.serve(ws_handler, "0.0.0.0", PORT):
+    ws_server = await websockets.serve(ws_handler, "0.0.0.0", PORT)
+    try:
         await broadcast_loop()
+    finally:
+        await stop()
 
 
 if __name__ == "__main__":

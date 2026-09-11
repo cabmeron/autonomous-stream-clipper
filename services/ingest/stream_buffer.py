@@ -1,3 +1,4 @@
+import atexit
 import glob
 import logging
 import os
@@ -5,14 +6,30 @@ import platform
 import random
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import threading
 import time
-from typing import List, Optional
+from typing import List, Optional, Set
 from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
+
+# Global registry of active buffers to guarantee no orphaned FFmpeg/streamlink processes linger
+_ACTIVE_BUFFERS: Set["StreamRingBuffer"] = set()
+
+
+def _cleanup_all_buffers():
+    """atexit handler to terminate any remaining stream ingestion subprocesses."""
+    for buf in list(_ACTIVE_BUFFERS):
+        try:
+            buf.stop()
+        except Exception:
+            pass
+
+
+atexit.register(_cleanup_all_buffers)
 
 
 def clean_channel_name(raw: str) -> str:
@@ -202,8 +219,49 @@ class StreamRingBuffer:
 
         return None
 
+    def _terminate_current_process(self):
+        """Cleanly terminates the active subprocess and all its children via process group signals."""
+        proc = self.process
+        self.process = None
+        if proc is None:
+            return
+
+        try:
+            if platform.system() != "Windows":
+                try:
+                    pgid = os.getpgid(proc.pid)
+                    if pgid != os.getpgrp() and pgid > 1:
+                        os.killpg(pgid, signal.SIGTERM)
+                    else:
+                        proc.terminate()
+                except (ProcessLookupError, OSError):
+                    proc.terminate()
+            else:
+                proc.terminate()
+            proc.wait(timeout=2.0)
+        except Exception:
+            # Escalate to SIGKILL for the entire process group if not terminated within timeout
+            try:
+                if platform.system() != "Windows":
+                    try:
+                        pgid = os.getpgid(proc.pid)
+                        if pgid != os.getpgrp() and pgid > 1:
+                            os.killpg(pgid, signal.SIGKILL)
+                        else:
+                            proc.kill()
+                    except (ProcessLookupError, OSError):
+                        proc.kill()
+                else:
+                    proc.kill()
+                proc.wait(timeout=1.0)
+            except Exception:
+                pass
+
     def _start_ingest_process(self):
         """Starts the stream ingestion or simulation subprocess."""
+        if self.process is not None:
+            self._terminate_current_process()
+
         os.makedirs(self.shm_dir, exist_ok=True)
         out_pattern = os.path.join(self.shm_dir, "seg_%02d.ts")
         self._last_process_start_time = time.time()
@@ -285,21 +343,7 @@ class StreamRingBuffer:
                             self.channel,
                         )
                         self.current_offline_interval = self.min_offline_check_interval
-                        if self.process:
-                            try:
-                                if platform.system() != "Windows":
-                                    try:
-                                        pgid = os.getpgid(self.process.pid)
-                                        if pgid != os.getpgrp() and pgid > 1:
-                                            os.killpg(pgid, 15)
-                                        else:
-                                            self.process.terminate()
-                                    except (ProcessLookupError, OSError):
-                                        self.process.terminate()
-                                else:
-                                    self.process.terminate()
-                            except Exception:
-                                pass
+                        self._terminate_current_process()
                         self._start_ingest_process()
                     else:
                         # Stream remains offline: schedule next check with exponential backoff and jitter
@@ -353,6 +397,7 @@ class StreamRingBuffer:
     def start(self):
         """Starts ingestion and launches the background supervisor watchdog."""
         self.running = True
+        _ACTIVE_BUFFERS.add(self)
         self._start_ingest_process()
         self._watchdog_thread = threading.Thread(target=self._watchdog_loop, daemon=True)
         self._watchdog_thread.start()
@@ -390,29 +435,16 @@ class StreamRingBuffer:
         return segments[-1]
 
     def stop(self):
-        """Terminates the process group and wipes temporary video segments."""
+        """Terminates the process group, shuts down threads, and wipes temporary video segments."""
         self.running = False
-        if self.process:
-            try:
-                if platform.system() != "Windows":
-                    try:
-                        pgid = os.getpgid(self.process.pid)
-                        if pgid != os.getpgrp() and pgid > 1:
-                            os.killpg(pgid, 15)
-                        else:
-                            self.process.terminate()
-                    except (ProcessLookupError, OSError):
-                        self.process.terminate()
-                else:
-                    self.process.terminate()
-                self.process.wait(timeout=5)
-            except Exception as e:
-                logger.debug("[Buffer:%s] Error terminating process: %s", self.channel, e)
-                try:
-                    self.process.kill()
-                except Exception:
-                    pass
-            self.process = None
+        _ACTIVE_BUFFERS.discard(self)
+
+        self._terminate_current_process()
+
+        if self._watchdog_thread and self._watchdog_thread.is_alive():
+            if self._watchdog_thread != threading.current_thread():
+                self._watchdog_thread.join(timeout=1.5)
+        self._watchdog_thread = None
 
         shutil.rmtree(self.shm_dir, ignore_errors=True)
         logger.info("[Buffer:%s] Stopped and wiped buffer", self.channel)
