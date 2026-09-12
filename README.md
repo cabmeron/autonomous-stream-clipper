@@ -2,8 +2,6 @@
 
 ASC is a 100% local pipeline that captures viral stream moments in real time. 
 
-It monitors Twitch Chat velocity, audio volume surges, and on-screen OCR win multipliers across multiple live channels simultaneously. 
-
 Everything runs on your machine with zero external cloud dependencies or API keys required.
 
 The app maintains rolling in-memory video buffers and captures post-event reactions when excitement spikes. 
