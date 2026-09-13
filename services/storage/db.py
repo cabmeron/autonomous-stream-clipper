@@ -95,6 +95,16 @@ class DatabaseRepository:
             """)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_summaries_channel ON screen_summaries(channel_name);")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_summaries_created ON screen_summaries(created_at DESC);")
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS graph_templates (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    definition_json TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_templates_created ON graph_templates(created_at DESC);")
             conn.commit()
         logger.info("[Database] Local SQLite database ready at: %s (WAL mode enabled)", self._sqlite_path)
 
@@ -301,6 +311,50 @@ class DatabaseRepository:
                 cursor.execute("SELECT * FROM screen_summaries ORDER BY created_at DESC LIMIT ?", (limit,))
             rows = cursor.fetchall()
             return [dict(r) for r in rows]
+
+    def save_template(self, template_id: str, name: str, definition: dict) -> str:
+        """Persists a custom Node Studio pipeline template (preset)."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT INTO graph_templates (id, name, definition_json) VALUES (?, ?, ?)",
+                (template_id, name, json.dumps(definition)),
+            )
+            conn.commit()
+        logger.info("[Database] Saved custom graph template '%s' (%s)", name, template_id)
+        return template_id
+
+    def get_template(self, template_id: str) -> Optional[dict]:
+        """Retrieves a single custom template's definition by ID."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT definition_json FROM graph_templates WHERE id = ?", (template_id,))
+            row = cursor.fetchone()
+            return json.loads(row[0]) if row else None
+
+    def list_templates(self) -> List[Dict]:
+        """Lists all saved custom templates, newest first."""
+        with self._get_connection() as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT id, name, definition_json, created_at FROM graph_templates ORDER BY created_at DESC")
+            results = []
+            for row in cursor.fetchall():
+                d = dict(row)
+                try:
+                    d["description"] = json.loads(d["definition_json"]).get("description", "")
+                except Exception:
+                    d["description"] = ""
+                results.append(d)
+            return results
+
+    def delete_template(self, template_id: str) -> bool:
+        """Deletes a custom template by ID."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM graph_templates WHERE id = ?", (template_id,))
+            conn.commit()
+            return cursor.rowcount > 0
 
     def close(self):
         """Flushes SQLite WAL log and executes checkpoint to cleanly close the database."""

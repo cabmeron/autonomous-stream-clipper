@@ -2,9 +2,20 @@ import pytest
 from services.orchestrator_dag import GraphDAGManager, COMPATIBLE_TYPES, PORT_TYPES
 
 
-def test_default_template_structure():
-    """Verify that default graph template contains expected node catalog and wires."""
+def test_manager_starts_empty():
+    """Verify the graph starts with no nodes/wires - nothing can trigger until a user
+    actually adds a stream or picks a preset/template."""
     mgr = GraphDAGManager()
+    graph = mgr.get_graph()
+
+    assert graph["nodes"] == []
+    assert graph["wires"] == []
+
+
+def test_add_stream_pipeline_default_preset_structure():
+    """Verify that add_stream_pipeline's default preset builds the expected node catalog and wires."""
+    mgr = GraphDAGManager()
+    mgr.add_stream_pipeline("teststream", auto_sequence=True)
     graph = mgr.get_graph()
 
     assert "nodes" in graph
@@ -30,18 +41,19 @@ def test_default_template_structure():
 def test_type_compatibility_validation():
     """Verify that type compatibility prevents illegal wire connections."""
     mgr = GraphDAGManager()
+    mgr.add_stream_pipeline("teststream", auto_sequence=True)
     nodes = {n["id"]: n for n in mgr.nodes.values()}
 
     # Valid wire: video -> video
     valid_wires = [
-        {"id": "w_test", "from": "node_stream:video", "to": "node_ocr:video_in", "type": "video"}
+        {"id": "w_test", "from": "node_stream_teststream:video", "to": "node_ocr_teststream:video_in", "type": "video"}
     ]
     valid, msg = mgr.validate_dag(nodes, valid_wires)
     assert valid is True
 
     # Invalid wire: audio -> video_in
     invalid_wires = [
-        {"id": "w_bad", "from": "node_stream:audio", "to": "node_ocr:video_in", "type": "audio"}
+        {"id": "w_bad", "from": "node_stream_teststream:audio", "to": "node_ocr_teststream:video_in", "type": "audio"}
     ]
     valid, msg = mgr.validate_dag(nodes, invalid_wires)
     assert valid is False
@@ -84,14 +96,16 @@ def test_cycle_detection_kahns_algorithm():
 def test_node_param_hot_reload():
     """Verify that update_node_param updates properties immediately."""
     mgr = GraphDAGManager()
-    ok = mgr.update_node_param("node_audio", "jump_db_threshold", 16.5)
+    mgr.add_stream_pipeline("teststream", auto_sequence=True)
+    ok = mgr.update_node_param("node_audio_teststream", "jump_db_threshold", 16.5)
     assert ok is True
-    assert mgr.nodes["node_audio"]["properties"]["jump_db_threshold"] == 16.5
+    assert mgr.nodes["node_audio_teststream"]["properties"]["jump_db_threshold"] == 16.5
 
 
 def test_sync_graph_payload():
     """Verify that sync_graph applies new layout."""
     mgr = GraphDAGManager()
+    mgr.add_stream_pipeline("teststream", auto_sequence=True)
     payload = {
         "nodes": list(mgr.nodes.values()),
         "wires": mgr.wires,
@@ -104,10 +118,11 @@ def test_sync_graph_payload():
 def test_stream_node_channel_switch():
     """Verify that switching channel on StreamSourceNode updates title and properties."""
     mgr = GraphDAGManager()
-    ok = mgr.update_node_param("node_stream", "channel", "zarbex")
+    mgr.add_stream_pipeline("teststream", auto_sequence=True)
+    ok = mgr.update_node_param("node_stream_teststream", "channel", "zarbex")
     assert ok is True
-    assert mgr.nodes["node_stream"]["properties"]["channel"] == "zarbex"
-    assert mgr.nodes["node_stream"]["title"] == "Twitch Source: #zarbex"
+    assert mgr.nodes["node_stream_teststream"]["properties"]["channel"] == "zarbex"
+    assert mgr.nodes["node_stream_teststream"]["title"] == "Twitch Source: #zarbex"
 
 
 def test_multi_stream_routing_and_isolation():

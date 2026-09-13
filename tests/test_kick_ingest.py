@@ -164,14 +164,15 @@ def test_stream_session_explicit_platform_override():
 
 def test_dag_stream_source_kick_platform():
     mgr = GraphDAGManager()
-    stream_node = mgr.nodes.get("node_stream")
+    mgr.add_stream_pipeline("teststream", auto_sequence=True)
+    stream_node = mgr.nodes.get("node_stream_teststream")
     assert stream_node is not None
 
     # Switch to Kick
-    assert mgr.update_node_param("node_stream", "platform", "kick") is True
-    assert mgr.nodes["node_stream"]["properties"]["platform"] == "kick"
-    assert "Kick Source:" in mgr.nodes["node_stream"]["title"]
+    assert mgr.update_node_param("node_stream_teststream", "platform", "kick") is True
+    assert mgr.nodes["node_stream_teststream"]["properties"]["platform"] == "kick"
+    assert "Kick Source:" in mgr.nodes["node_stream_teststream"]["title"]
 
     # Switch channel on Kick
-    assert mgr.update_node_param("node_stream", "channel", "trainwreckstv") is True
-    assert mgr.nodes["node_stream"]["title"] == "Kick Source: #trainwreckstv"
+    assert mgr.update_node_param("node_stream_teststream", "channel", "trainwreckstv") is True
+    assert mgr.nodes["node_stream_teststream"]["title"] == "Kick Source: #trainwreckstv"

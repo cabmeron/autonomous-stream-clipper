@@ -101,18 +101,19 @@ def test_db_folder_schema_and_queries(temp_db):
 
 
 def test_dag_default_template_has_clip_folder():
-    """Verifies that default template connects HardwareRenderNode -> ClipFolderNode."""
+    """Verifies that add_stream_pipeline's default preset connects HardwareRenderNode -> ClipFolderNode."""
     dag = GraphDAGManager()
-    
-    assert "node_folder" in dag.nodes
-    folder_node = dag.nodes["node_folder"]
+    dag.add_stream_pipeline("teststream", auto_sequence=True)
+
+    assert "node_folder_teststream" in dag.nodes
+    folder_node = dag.nodes["node_folder_teststream"]
     assert folder_node["type"] == "ClipFolderNode"
     assert folder_node["properties"]["folder_name"] == "Highlight Reels"
     assert "date" in folder_node["properties"]
 
     # Verify wire exists
     render_to_folder = next(
-        (w for w in dag.wires if w["from"] == "node_render:clip_asset" and w["to"] == "node_folder:clip_in"),
+        (w for w in dag.wires if w["from"] == "node_render_teststream:clip_asset" and w["to"] == "node_folder_teststream:clip_in"),
         None,
     )
     assert render_to_folder is not None
@@ -129,6 +130,7 @@ def test_multi_renderer_routing_to_single_folder():
     can both route their finished clips to a single shared ClipFolderNode.
     """
     dag = GraphDAGManager()
+    dag.add_stream_pipeline("teststream", auto_sequence=True)
 
     # Add second hardware renderer (e.g. vertical shorts)
     dag.nodes["node_render_vert"] = {
@@ -146,18 +148,18 @@ def test_multi_renderer_routing_to_single_folder():
     dag.wires.append({
         "id": "w_vert_to_folder",
         "from": "node_render_vert:clip_asset",
-        "to": "node_folder:clip_in",
+        "to": "node_folder_teststream:clip_in",
         "type": "clip",
     })
 
-    # Validate graph with two incoming wires into node_folder:clip_in
+    # Validate graph with two incoming wires into the folder node's clip_in
     valid, msg = dag.validate_dag(dag.nodes, dag.wires)
     assert valid is True, msg
 
     # Resolve downstream folder
-    downstream = dag.get_downstream_folder_for_session("marlon")
+    downstream = dag.get_downstream_folder_for_session("teststream")
     assert downstream is not None
-    assert downstream["folder_id"] == "node_folder"
+    assert downstream["folder_id"] == "node_folder_teststream"
     assert downstream["folder_name"] == "Highlight Reels"
 
 
@@ -170,8 +172,9 @@ def test_clip_folder_telemetry_payload(temp_db):
 
     orchestrator = DummyOrchestrator(temp_db)
     dag = GraphDAGManager(orchestrator=orchestrator)
+    dag.add_stream_pipeline("teststream", auto_sequence=True)
 
-    # Save a clip under node_folder
+    # Save a clip under node_folder_teststream
     temp_db.save_clip({
         "channel_name": "marlon",
         "video_url": "/storage/clips/test_clip.mp4",
@@ -181,16 +184,16 @@ def test_clip_folder_telemetry_payload(temp_db):
         "cut_end": 32.5,
         "heuristic_score": 7,
         "suggested_title": "Great Gameplay Moment",
-        "folder_id": "node_folder",
+        "folder_id": "node_folder_teststream",
         "folder_name": "Highlight Reels",
         "folder_date": "2026-09-09",
     })
 
     payload = dag.get_node_telemetry_payload()
-    assert "node_folder" in payload
-    folder_data = payload["node_folder"]
+    assert "node_folder_teststream" in payload
+    folder_data = payload["node_folder_teststream"]
 
-    assert folder_data["folder_id"] == "node_folder"
+    assert folder_data["folder_id"] == "node_folder_teststream"
     assert folder_data["clip_count"] == 1
     assert folder_data["total_duration"] == 32.5
     assert len(folder_data["wired_renderers"]) >= 1
@@ -200,10 +203,11 @@ def test_clip_folder_telemetry_payload(temp_db):
 def test_update_node_param_folder_name():
     """Verifies that updating folder_name mutates node properties and title."""
     dag = GraphDAGManager()
-    success = dag.update_node_param("node_folder", "folder_name", "Crazy Slots 2026")
+    dag.add_stream_pipeline("teststream", auto_sequence=True)
+    success = dag.update_node_param("node_folder_teststream", "folder_name", "Crazy Slots 2026")
     assert success is True
-    assert dag.nodes["node_folder"]["properties"]["folder_name"] == "Crazy Slots 2026"
-    assert dag.nodes["node_folder"]["title"] == "Clip Folder: Crazy Slots 2026"
+    assert dag.nodes["node_folder_teststream"]["properties"]["folder_name"] == "Crazy Slots 2026"
+    assert dag.nodes["node_folder_teststream"]["title"] == "Clip Folder: Crazy Slots 2026"
 
 
 @pytest.mark.asyncio

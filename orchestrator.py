@@ -54,6 +54,7 @@ logger = logging.getLogger("orchestrator")
 
 DEBOUNCE_SEC = float(os.getenv("HEURISTIC_DEBOUNCE_SECONDS", "30"))
 POST_DELAY_SEC = float(os.getenv("POST_EVENT_DELAY_SECONDS", "10"))
+ARM_DELAY_SEC = float(os.getenv("STREAM_ARM_DELAY_SECONDS", "20"))
 HTTP_PORT = int(os.getenv("HTTP_PORT", "8000"))
 STORAGE_DIR = os.getenv("STORAGE_DIR", "./storage/clips")
 ENABLE_OCR = os.getenv("OCR_ENABLED", "true").lower() == "true"
@@ -145,6 +146,7 @@ class StreamSession:
             on_trigger_activated=self._on_trigger_activated,
             debounce_seconds=DEBOUNCE_SEC,
             post_event_delay_seconds=POST_DELAY_SEC,
+            arm_delay_seconds=ARM_DELAY_SEC,
         )
 
         # 6. Local Chat State Descriptor Service (Disabled by default, superseded by on-demand Screen State Summarizer)
@@ -204,6 +206,7 @@ class StreamSession:
         logger.info("[Session:%s] Starting stream buffer and chat listener...", self.channel)
         self.loop = loop
         self.gate_evaluator.loop = loop
+        self.gate_evaluator.arm()
         self.buffer.start()
         self.chat_task = loop.create_task(self.chat_engine.listen())
 
@@ -407,6 +410,7 @@ class StreamSession:
             "gambling_multiplier": self.extra_telemetry.get("gambling_multiplier", 0.0),
             "gambling_spin_state": self.extra_telemetry.get("gambling_spin_state", "IDLE"),
             "gambling_ledger": self.gambling_ledger.get_summary() if getattr(self, "gambling_ledger", None) else {},
+            "gate_arm_status": self.gate_evaluator.get_arm_status() if getattr(self, "gate_evaluator", None) else {"is_arming": False, "arm_remaining_seconds": 0.0},
             "buffered_messages": calc["buffered_messages"],
             "total_messages": calc.get("total_messages", 0),
             "buffered_segments": self.buffer.get_segment_count() if self.buffer else 0,
@@ -624,6 +628,7 @@ class StreamClipperOrchestrator:
         simulate: bool = False,
         platform: Optional[str] = None,
         auto_sequence: bool = True,
+        preset: Optional[str] = None,
     ) -> dict:
         """Adds a new channel session and begins ingestion."""
         clean, detected_plat = detect_channel_and_platform(channel, default_platform=platform or "twitch")
@@ -648,7 +653,7 @@ class StreamClipperOrchestrator:
         if hasattr(self, "graph_manager") and self.graph_manager:
             try:
                 self.graph_manager.add_stream_pipeline(
-                    clean, platform=plat, auto_sequence=auto_sequence, simulate=simulate
+                    clean, platform=plat, auto_sequence=auto_sequence, simulate=simulate, preset=preset
                 )
             except Exception as ge:
                 logger.warning("[Orchestrator] Failed to update graph for #%s: %s", clean, ge)
@@ -1146,8 +1151,9 @@ class StreamClipperOrchestrator:
                 platform = data.get("platform")
                 simulate = bool(data.get("simulate", False))
                 auto_sequence = bool(data.get("auto_sequence", True))
+                preset = data.get("preset")
                 res = await self.add_session(
-                    channel, simulate=simulate, platform=platform, auto_sequence=auto_sequence
+                    channel, simulate=simulate, platform=platform, auto_sequence=auto_sequence, preset=preset
                 )
                 return web.json_response(res)
             except ValueError as ve:
@@ -1644,17 +1650,44 @@ class StreamClipperOrchestrator:
                 platform = data.get("platform", "twitch")
                 auto_sequence = bool(data.get("auto_sequence", True))
                 simulate = bool(data.get("simulate", False))
+                preset = data.get("preset")
                 res = self.graph_manager.add_stream_pipeline(
-                    channel, platform=platform, auto_sequence=auto_sequence, simulate=simulate
+                    channel, platform=platform, auto_sequence=auto_sequence, simulate=simulate, preset=preset
                 )
                 return web.json_response(res)
             except Exception as e:
                 return web.json_response({"error": str(e)}, status=400)
 
+        # Node Studio Presets & Custom Templates
+        async def get_graph_presets_handler(request):
+            return web.json_response({"presets": self.graph_manager.list_presets()})
+
+        async def post_graph_template_handler(request):
+            try:
+                data = await request.json()
+                name = str(data.get("name", "")).strip()
+                channel = data.get("channel", "")
+                if not name or not channel:
+                    return web.json_response({"error": "name and channel are required"}, status=400)
+                result = self.graph_manager.save_custom_template(name, channel)
+                if not result:
+                    return web.json_response({"error": f"No active pipeline found for #{channel}"}, status=404)
+                return web.json_response({"success": True, "template": result})
+            except Exception as e:
+                return web.json_response({"error": str(e)}, status=400)
+
+        async def delete_graph_template_handler(request):
+            template_id = request.match_info["id"]
+            success = self.graph_manager.delete_custom_template(template_id)
+            return web.json_response({"success": success})
+
         app.router.add_get("/api/graph", get_graph_handler)
         app.router.add_post("/api/graph/sync", post_graph_sync_handler)
         app.router.add_post("/api/graph/nodes/{id}/param", post_graph_node_param_handler)
         app.router.add_post("/api/graph/stream-pipeline", post_graph_stream_pipeline_handler)
+        app.router.add_get("/api/graph/presets", get_graph_presets_handler)
+        app.router.add_post("/api/graph/templates", post_graph_template_handler)
+        app.router.add_delete("/api/graph/templates/{id}", delete_graph_template_handler)
 
         # Static mounts
         app.router.add_static("/clips", clips_dir)

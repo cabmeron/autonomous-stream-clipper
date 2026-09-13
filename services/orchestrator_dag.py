@@ -35,6 +35,170 @@ COMPATIBLE_TYPES = {
     "clip": {"clip"},
 }
 
+# Per-category node blueprint: type, display title, default properties, and ports.
+# Presets and custom templates are just an ordered list of these category keys -
+# this is the single source of truth for what each worker node looks like.
+CATEGORY_DEFS: Dict[str, dict] = {
+    "audio": {
+        "type": "AudioMonitorNode",
+        "title": "Audio Monitor",
+        "properties": {"jump_db_threshold": 12.0, "baseline_adaptation": 0.90},
+        "inputs": [{"id": "audio_in", "name": "Audio In", "type": "audio"}],
+        "outputs": [
+            {"id": "spike_trigger", "name": "Audio Spike", "type": "trigger"},
+            {"id": "live_db", "name": "Current dB", "type": "scalar"},
+        ],
+    },
+    "chat": {
+        "type": "ChatVelocityNode",
+        "title": "Chat Velocity Engine",
+        "properties": {"spike_ratio_threshold": 3.0, "instant_min_threshold": 10.0},
+        "inputs": [{"id": "chat_in", "name": "Chat In", "type": "chat"}],
+        "outputs": [
+            {"id": "spike_trigger", "name": "Chat Spike", "type": "trigger"},
+            {"id": "velocity", "name": "Messages/s", "type": "scalar"},
+        ],
+    },
+    "cv": {
+        "type": "CVTransformerNode",
+        "title": "Hugging Face Vision",
+        "properties": {
+            "candidate_labels": "gameplay action, victory celebration, defeat game over, in-game menu, streamer facecam, brb waiting screen",
+            "trigger_labels": "victory celebration, jackpot win, epic moment",
+            "confidence_threshold": 0.70,
+        },
+        "inputs": [{"id": "video_in", "name": "Video In", "type": "video"}],
+        "outputs": [
+            {"id": "spike_trigger", "name": "Vision Trigger", "type": "trigger"},
+            {"id": "confidence", "name": "Top Confidence", "type": "scalar"},
+            {"id": "top_label", "name": "Top Class", "type": "text"},
+        ],
+    },
+    "ocr": {
+        "type": "OCRVisionNode",
+        "title": "OCR / Vision Engine",
+        "properties": {
+            "multiplier_threshold": 100.0,
+            "roi": {"x": 0.70, "y": 0.85, "w": 0.28, "h": 0.12},
+        },
+        "inputs": [{"id": "video_in", "name": "Video In", "type": "video"}],
+        "outputs": [
+            {"id": "ocr_trigger", "name": "Win Trigger", "type": "trigger"},
+            {"id": "multiplier", "name": "Multiplier", "type": "scalar"},
+        ],
+    },
+    "gate": {
+        "type": "GateEvaluatorNode",
+        "title": "Gate Evaluator & Logic",
+        "properties": {
+            "mode": "WEIGHTED_SCORE",
+            "min_score": 4,
+            "debounce_seconds": 30.0,
+            "post_event_delay": 10.0,
+        },
+        # Populated dynamically per-instantiation from GATE_TRIGGER_SOURCES.
+        "inputs": [],
+        "outputs": [
+            {"id": "clip_trigger", "name": "Clip Trigger Out", "type": "trigger"},
+            {"id": "score", "name": "Evaluated Score", "type": "scalar"},
+        ],
+    },
+    "slicer": {
+        "type": "SegmentSlicerNode",
+        "title": "60s Rolling Slicer",
+        "properties": {"window_seconds": 60},
+        "inputs": [
+            {"id": "video_in", "name": "Video In", "type": "video"},
+            {"id": "trigger_in", "name": "Trigger In", "type": "trigger"},
+        ],
+        "outputs": [{"id": "candidate_slice", "name": "Raw Candidate Slice", "type": "video"}],
+    },
+    "render": {
+        "type": "HardwareRenderNode",
+        "title": "Hardware Video Renderer",
+        "properties": {"crop_vertical": False, "enable_subs": False, "encoder": "auto"},
+        "inputs": [{"id": "candidate_in", "name": "Candidate Video", "type": "video"}],
+        "outputs": [{"id": "clip_asset", "name": "Finished MP4 Clip", "type": "clip"}],
+    },
+    "folder": {
+        "type": "ClipFolderNode",
+        "title": "Clip Folder: Highlight Reels",
+        "properties": {"folder_name": "Highlight Reels"},
+        "inputs": [{"id": "clip_in", "name": "Clip In", "type": "clip"}],
+        "outputs": [],
+    },
+}
+
+# Categories that produce a trigger consumed by the gate, in preferred port order.
+# (category, output_port_id, input_port_label)
+GATE_TRIGGER_SOURCES: List[Tuple[str, str, str]] = [
+    ("audio", "spike_trigger", "Audio Trigger In"),
+    ("chat", "spike_trigger", "Chat Trigger In"),
+    ("ocr", "ocr_trigger", "OCR Trigger In"),
+    ("cv", "spike_trigger", "Vision Trigger In"),
+]
+
+# Fixed wiring shape (excluding the dynamically-numbered trigger->gate wires above).
+# Entries are silently skipped if either category isn't present in a given pipeline.
+BASE_WIRE_DEFS: List[Tuple[str, str, str, str]] = [
+    ("stream", "audio", "audio", "audio_in"),
+    ("stream", "chat", "chat", "chat_in"),
+    ("stream", "video", "ocr", "video_in"),
+    ("stream", "video", "cv", "video_in"),
+    ("stream", "video", "slicer", "video_in"),
+    ("gate", "clip_trigger", "slicer", "trigger_in"),
+    ("slicer", "candidate_slice", "render", "candidate_in"),
+    ("render", "clip_asset", "folder", "clip_in"),
+]
+
+# Node layout: x column per category, y offset from the stream source node's row.
+CATEGORY_LAYOUT: Dict[str, Tuple[int, int]] = {
+    "audio": (440, -160),
+    "chat": (440, 50),
+    "cv": (440, 260),
+    "ocr": (440, 560),
+    "gate": (820, 60),
+    "slicer": (1180, 60),
+    "render": (1520, 60),
+    "folder": (1880, 60),
+}
+
+# Built-in starter presets. Users can also save their own via save_custom_template().
+BUILTIN_PRESETS: Dict[str, dict] = {
+    "gambling_slots": {
+        "id": "gambling_slots",
+        "name": "Gambling / Slots Streamer",
+        "description": (
+            "Full heuristics stack tuned for slot-stream big-win detection: chat velocity, "
+            "audio spikes, computer vision, and OCR win-multiplier reading, all feeding a "
+            "gate evaluator into the render pipeline."
+        ),
+        "built_in": True,
+        "categories": ["audio", "chat", "cv", "ocr", "gate", "slicer", "render", "folder"],
+    },
+    "general_highlights": {
+        "id": "general_highlights",
+        "name": "General Highlights",
+        "description": (
+            "Chat velocity, audio spikes, and computer vision feeding a gate evaluator - no "
+            "OCR or gambling-specific engines. A good fit for non-gambling streams."
+        ),
+        "built_in": True,
+        "categories": ["audio", "chat", "cv", "gate", "slicer", "render", "folder"],
+    },
+    "minimal": {
+        "id": "minimal",
+        "name": "Minimal (Chat + Audio Only)",
+        "description": (
+            "Just chat velocity and audio spikes feeding the gate evaluator - the lightest "
+            "starting point to build on."
+        ),
+        "built_in": True,
+        "categories": ["audio", "chat", "gate", "slicer", "render", "folder"],
+    },
+}
+DEFAULT_PRESET_ID = "gambling_slots"
+
 
 class GraphDAGManager:
     """Manages the visual node graph topology, dynamic stream routing, and parameter mutators."""
@@ -42,316 +206,156 @@ class GraphDAGManager:
     def __init__(self, orchestrator=None):
         self.orchestrator = orchestrator
         self.graph_id = "default_studio_graph"
+        # Starts empty: no placeholder pipeline is built (and therefore nothing can ever
+        # trigger a clip) until a user actually adds a stream or picks a preset/template.
         self.nodes: Dict[str, dict] = {}
         self.wires: List[dict] = []  # List of {"id": str, "from": str, "to": str, "type": str}
         self.last_sync_time = time.time()
 
-        # Initialize default graph topology
-        self.load_default_template()
+    def _reachable_from(self, seed_ids: Set[str]) -> Set[str]:
+        """Follows wires forward (from -> to) to collect every node downstream of the seeds."""
+        seen = set(seed_ids)
+        queue = deque(seed_ids)
+        while queue:
+            cur = queue.popleft()
+            for wire in self.wires:
+                src = wire.get("from", "").split(":")[0]
+                dst = wire.get("to", "").split(":")[0]
+                if src == cur and dst not in seen:
+                    seen.add(dst)
+                    queue.append(dst)
+        return seen
 
-    def load_default_template(self, channel: str = "marlon", simulate: bool = False):
-        """Builds a classic ComfyUI workflow template connecting stream sources to heuristics and clipping."""
-        self.nodes = {
-            "node_stream": {
-                "id": "node_stream",
-                "type": "StreamSourceNode",
-                "title": f"Twitch Source: #{channel}",
-                "category": "stream",
-                "position": [60, 160],
-                "properties": {
-                    "channel": channel,
-                    "platform": "twitch",
-                    "simulate": simulate,
-                },
-                "inputs": [],
-                "outputs": [
-                    {"id": "video", "name": "Video Stream", "type": "video"},
-                    {"id": "audio", "name": "Audio Stream", "type": "audio"},
-                    {"id": "chat", "name": "Chat Stream", "type": "chat"},
-                ],
-            },
-            "node_audio": {
-                "id": "node_audio",
-                "type": "AudioMonitorNode",
-                "title": "Audio Decibel Monitor",
-                "category": "audio",
-                "position": [440, 60],
-                "properties": {
-                    "jump_db_threshold": 12.0,
-                    "baseline_adaptation": 0.90,
-                },
-                "inputs": [
-                    {"id": "audio_in", "name": "Audio In", "type": "audio"},
-                ],
-                "outputs": [
-                    {"id": "spike_trigger", "name": "Audio Spike", "type": "trigger"},
-                    {"id": "live_db", "name": "Current dB", "type": "scalar"},
-                ],
-            },
-            "node_chat": {
-                "id": "node_chat",
-                "type": "ChatVelocityNode",
-                "title": "Chat Velocity Engine",
-                "category": "chat",
-                "position": [440, 270],
-                "properties": {
-                    "spike_ratio_threshold": 3.0,
-                    "instant_min_threshold": 10.0,
-                },
-                "inputs": [
-                    {"id": "chat_in", "name": "Chat In", "type": "chat"},
-                ],
-                "outputs": [
-                    {"id": "spike_trigger", "name": "Chat Spike", "type": "trigger"},
-                    {"id": "velocity", "name": "Messages/s", "type": "scalar"},
-                ],
-            },
-            "node_cv": {
-                "id": "node_cv",
-                "type": "CVTransformerNode",
-                "title": "Hugging Face Vision",
-                "category": "cv",
-                "position": [440, 480],
-                "properties": {
-                    "candidate_labels": "gameplay action, victory celebration, defeat game over, in-game menu, streamer facecam, brb waiting screen",
-                    "trigger_labels": "victory celebration, jackpot win, epic moment",
-                    "confidence_threshold": 0.70,
-                },
-                "inputs": [
-                    {"id": "video_in", "name": "Video In", "type": "video"},
-                ],
-                "outputs": [
-                    {"id": "spike_trigger", "name": "Vision Trigger", "type": "trigger"},
-                    {"id": "confidence", "name": "Top Confidence", "type": "scalar"},
-                    {"id": "top_label", "name": "Top Class", "type": "text"},
-                ],
-            },
-            "node_ocr": {
-                "id": "node_ocr",
-                "type": "OCRVisionNode",
-                "title": "OCR / Vision Engine",
-                "category": "ocr",
-                "position": [440, 780],
-                "properties": {
-                    "multiplier_threshold": 100.0,
-                    "roi": {"x": 0.70, "y": 0.85, "w": 0.28, "h": 0.12},
-                },
-                "inputs": [
-                    {"id": "video_in", "name": "Video In", "type": "video"},
-                ],
-                "outputs": [
-                    {"id": "ocr_trigger", "name": "Win Trigger", "type": "trigger"},
-                    {"id": "multiplier", "name": "Multiplier", "type": "scalar"},
-                ],
-            },
-            "node_gate": {
-                "id": "node_gate",
-                "type": "GateEvaluatorNode",
-                "title": "Gate Evaluator & Logic",
-                "category": "gate",
-                "position": [820, 220],
-                "properties": {
-                    "mode": "WEIGHTED_SCORE",
-                    "min_score": 4,
-                    "debounce_seconds": 30.0,
-                    "post_event_delay": 10.0,
-                },
-                "inputs": [
-                    {"id": "trigger_1", "name": "Audio Trigger In", "type": "trigger"},
-                    {"id": "trigger_2", "name": "Chat Trigger In", "type": "trigger"},
-                    {"id": "trigger_3", "name": "OCR Trigger In", "type": "trigger"},
-                    {"id": "trigger_4", "name": "Vision Trigger In", "type": "trigger"},
-                ],
-                "outputs": [
-                    {"id": "clip_trigger", "name": "Clip Trigger Out", "type": "trigger"},
-                    {"id": "score", "name": "Evaluated Score", "type": "scalar"},
-                ],
-            },
-            "node_slicer": {
-                "id": "node_slicer",
-                "type": "SegmentSlicerNode",
-                "title": "60s Rolling Slicer",
-                "category": "slicer",
-                "position": [1180, 220],
-                "properties": {
-                    "window_seconds": 60,
-                },
-                "inputs": [
-                    {"id": "video_in", "name": "Video In", "type": "video"},
-                    {"id": "trigger_in", "name": "Trigger In", "type": "trigger"},
-                ],
-                "outputs": [
-                    {"id": "candidate_slice", "name": "Raw Candidate Slice", "type": "video"},
-                ],
-            },
-            "node_render": {
-                "id": "node_render",
-                "type": "HardwareRenderNode",
-                "title": "Hardware Video Renderer",
-                "category": "render",
-                "position": [1520, 220],
-                "properties": {
-                    "crop_vertical": False,
-                    "enable_subs": False,
-                    "encoder": "auto",
-                },
-                "inputs": [
-                    {"id": "candidate_in", "name": "Candidate Video", "type": "video"},
-                ],
-                "outputs": [
-                    {"id": "clip_asset", "name": "Finished MP4 Clip", "type": "clip"},
-                ],
-            },
-            "node_folder": {
-                "id": "node_folder",
-                "type": "ClipFolderNode",
-                "title": "Clip Folder: Highlight Reels",
-                "category": "storage",
-                "position": [1880, 220],
-                "properties": {
-                    "folder_name": "Highlight Reels",
-                    "date": time.strftime("%Y-%m-%d"),
-                },
-                "inputs": [
-                    {"id": "clip_in", "name": "Clip In", "type": "clip"},
-                ],
-                "outputs": [],
-            },
-        }
+    def get_preset_definition(self, preset_id: str) -> Optional[dict]:
+        """Resolves a preset id to its definition - checks built-ins first, then saved custom templates."""
+        if not preset_id:
+            return None
+        if preset_id in BUILTIN_PRESETS:
+            return BUILTIN_PRESETS[preset_id]
+        if self.orchestrator and getattr(self.orchestrator, "db", None):
+            try:
+                return self.orchestrator.db.get_template(preset_id)
+            except Exception as e:
+                logger.warning("[GraphDAG] Failed to load custom template '%s': %s", preset_id, e)
+        return None
 
-        # Wires connecting output ports (node:port) to input ports (node:port)
-        self.wires = [
-            {"id": "w1", "from": "node_stream:audio", "to": "node_audio:audio_in", "type": "audio"},
-            {"id": "w2", "from": "node_stream:chat", "to": "node_chat:chat_in", "type": "chat"},
-            {"id": "w3", "from": "node_stream:video", "to": "node_ocr:video_in", "type": "video"},
-            {"id": "w4", "from": "node_stream:video", "to": "node_slicer:video_in", "type": "video"},
-            {"id": "w5", "from": "node_audio:spike_trigger", "to": "node_gate:trigger_1", "type": "trigger"},
-            {"id": "w6", "from": "node_chat:spike_trigger", "to": "node_gate:trigger_2", "type": "trigger"},
-            {"id": "w7", "from": "node_ocr:ocr_trigger", "to": "node_gate:trigger_3", "type": "trigger"},
-            {"id": "w8", "from": "node_gate:clip_trigger", "to": "node_slicer:trigger_in", "type": "trigger"},
-            {"id": "w9", "from": "node_slicer:candidate_slice", "to": "node_render:candidate_in", "type": "video"},
-            {"id": "w10", "from": "node_stream:video", "to": "node_cv:video_in", "type": "video"},
-            {"id": "w11", "from": "node_cv:spike_trigger", "to": "node_gate:trigger_4", "type": "trigger"},
-            {"id": "w12", "from": "node_render:clip_asset", "to": "node_folder:clip_in", "type": "clip"},
+    def list_presets(self) -> List[dict]:
+        """Returns built-in presets plus any custom templates saved by the user."""
+        presets = [
+            {"id": p["id"], "name": p["name"], "description": p["description"], "built_in": True}
+            for p in BUILTIN_PRESETS.values()
         ]
-        self.last_sync_time = time.time()
+        if self.orchestrator and getattr(self.orchestrator, "db", None):
+            try:
+                for t in self.orchestrator.db.list_templates():
+                    presets.append({
+                        "id": t["id"],
+                        "name": t["name"],
+                        "description": t.get("description", ""),
+                        "built_in": False,
+                    })
+            except Exception as e:
+                logger.warning("[GraphDAG] Failed to list custom templates: %s", e)
+        return presets
 
-    def add_stream_pipeline(
-        self,
-        channel: str,
-        platform: str = "twitch",
-        auto_sequence: bool = True,
-        simulate: bool = False,
-    ) -> dict:
-        """Dynamically adds a stream source node or generates a full clipping sequence for a new stream."""
+    def save_custom_template(self, name: str, channel: str) -> Optional[dict]:
+        """Snapshots an active stream's pipeline (which categories + tuned properties) as a
+        reusable named template. Captures the heuristic mix and its threshold tuning, not
+        arbitrary custom wiring - templates always use the standard wiring shape for whatever
+        categories they include.
+        """
         from services.ingest.stream_buffer import clean_channel_name
         clean_ch = clean_channel_name(channel)
-        plat = str(platform or "twitch").lower()
 
-        # Check if a StreamSourceNode already exists for this channel
-        existing_stream_node = None
-        for nid, n in self.nodes.items():
-            if n.get("type") == "StreamSourceNode" and clean_channel_name(n.get("properties", {}).get("channel", "")) == clean_ch:
-                existing_stream_node = n
-                break
-
-        # Check if the graph only contains the initial default template ("marlon" placeholder not in active sessions)
-        stream_nodes = [n for n in self.nodes.values() if n.get("type") == "StreamSourceNode"]
-        is_default_placeholder = (
-            len(stream_nodes) == 1
-            and clean_channel_name(stream_nodes[0].get("properties", {}).get("channel", "")) == "marlon"
-            and (not self.orchestrator or "marlon" not in getattr(self.orchestrator, "sessions", {}))
+        stream_node = next(
+            (
+                n for n in self.nodes.values()
+                if n.get("type") == "StreamSourceNode"
+                and clean_channel_name(n.get("properties", {}).get("channel", "")) == clean_ch
+            ),
+            None,
         )
+        if not stream_node:
+            return None
 
-        if not auto_sequence:
-            # Mode: Stream only -> User builds nodes manually
-            if is_default_placeholder:
-                # Replace the initial placeholder template with just this single StreamSourceNode
-                self.nodes = {
-                    "node_stream": {
-                        "id": "node_stream",
-                        "type": "StreamSourceNode",
-                        "title": f"{plat.capitalize()} Source: #{clean_ch}",
-                        "category": "stream",
-                        "position": [60, 160],
-                        "properties": {
-                            "channel": clean_ch,
-                            "platform": plat,
-                            "simulate": simulate,
-                        },
-                        "inputs": [],
-                        "outputs": [
-                            {"id": "video", "name": "Video Stream", "type": "video"},
-                            {"id": "audio", "name": "Audio Stream", "type": "audio"},
-                            {"id": "chat", "name": "Chat Stream", "type": "chat"},
-                        ],
-                    }
-                }
-                self.wires = []
-            elif not existing_stream_node:
-                # Append a new isolated StreamSourceNode with no wires
-                new_id = f"node_stream_{clean_ch}"
-                max_y = max([n.get("position", [0, 160])[1] for n in self.nodes.values()] or [0])
-                self.nodes[new_id] = {
-                    "id": new_id,
-                    "type": "StreamSourceNode",
-                    "title": f"{plat.capitalize()} Source: #{clean_ch}",
-                    "category": "stream",
-                    "position": [60, max_y + 260],
-                    "properties": {
-                        "channel": clean_ch,
-                        "platform": plat,
-                        "simulate": simulate,
-                    },
-                    "inputs": [],
-                    "outputs": [
-                        {"id": "video", "name": "Video Stream", "type": "video"},
-                        {"id": "audio", "name": "Audio Stream", "type": "audio"},
-                        {"id": "chat", "name": "Chat Stream", "type": "chat"},
-                    ],
-                }
-            self.last_sync_time = time.time()
-            self._apply_graph_to_orchestrator()
-            return self.get_graph()
+        type_to_category = {v["type"]: k for k, v in CATEGORY_DEFS.items()}
+        reachable = self._reachable_from({stream_node["id"]})
 
-        # Mode: auto_sequence is True -> Generate complete clipping pipeline
-        if is_default_placeholder:
-            # Reconfigure the default template for the new stream
-            self.load_default_template(channel=clean_ch, simulate=simulate)
-            if "node_stream" in self.nodes:
-                self.nodes["node_stream"]["properties"]["platform"] = plat
-                self.nodes["node_stream"]["title"] = f"{plat.capitalize()} Source: #{clean_ch}"
-            self._apply_graph_to_orchestrator()
-            return self.get_graph()
+        categories: List[str] = []
+        property_overrides: Dict[str, dict] = {}
+        for nid in reachable:
+            if nid == stream_node["id"]:
+                continue
+            node = self.nodes.get(nid)
+            if not node:
+                continue
+            cat = type_to_category.get(node.get("type"))
+            if not cat or cat == "folder":
+                continue
+            categories.append(cat)
+            property_overrides[cat] = dict(node.get("properties", {}))
 
-        # If a stream node for this channel already exists, return current graph
-        if existing_stream_node:
-            return self.get_graph()
+        if any(self.nodes.get(nid, {}).get("type") == "ClipFolderNode" for nid in reachable):
+            categories.append("folder")
 
-        # Generate a complete parallel clipping sequence for this new stream
-        suffix = clean_ch
-        base_y = max([n.get("position", [0, 160])[1] for n in self.nodes.values()] or [0]) + 340
+        if not categories:
+            return None
 
-        stream_nid = f"node_stream_{suffix}"
-        audio_nid = f"node_audio_{suffix}"
-        chat_nid = f"node_chat_{suffix}"
-        cv_nid = f"node_cv_{suffix}"
-        ocr_nid = f"node_ocr_{suffix}"
-        gate_nid = f"node_gate_{suffix}"
-        slicer_nid = f"node_slicer_{suffix}"
-        render_nid = f"node_render_{suffix}"
+        template_id = f"custom_{uuid.uuid4().hex[:12]}"
+        definition = {
+            "id": template_id,
+            "name": name,
+            "description": f"Custom template saved from #{clean_ch}",
+            "built_in": False,
+            "categories": categories,
+            "property_overrides": property_overrides,
+        }
 
-        # Wire into existing ClipFolderNode or create one
-        folder_node = next((n for n in self.nodes.values() if n.get("type") == "ClipFolderNode"), None)
-        folder_nid = folder_node["id"] if folder_node else f"node_folder_{suffix}"
+        if self.orchestrator and getattr(self.orchestrator, "db", None):
+            self.orchestrator.db.save_template(template_id, name, definition)
 
-        self.nodes[stream_nid] = {
-            "id": stream_nid,
+        return definition
+
+    def delete_custom_template(self, template_id: str) -> bool:
+        """Removes a saved custom template. Built-in presets can't be deleted."""
+        if template_id in BUILTIN_PRESETS:
+            return False
+        if self.orchestrator and getattr(self.orchestrator, "db", None):
+            try:
+                return self.orchestrator.db.delete_template(template_id)
+            except Exception as e:
+                logger.warning("[GraphDAG] Failed to delete custom template '%s': %s", template_id, e)
+        return False
+
+    @staticmethod
+    def _port_type(node: dict, port_id: str, io: str) -> str:
+        for p in node.get(io, []):
+            if p["id"] == port_id:
+                return p["type"]
+        return "trigger"
+
+    def _instantiate_pipeline(
+        self,
+        categories: List[str],
+        channel: str,
+        plat: str,
+        simulate: bool,
+        base_y: float,
+        property_overrides: Optional[Dict[str, dict]] = None,
+    ) -> Tuple[Dict[str, dict], List[dict]]:
+        """Builds a fresh, channel-suffixed node/wire set for the given preset categories."""
+        suffix = channel
+        property_overrides = property_overrides or {}
+        node_ids: Dict[str, str] = {"stream": f"node_stream_{suffix}"}
+        new_nodes: Dict[str, dict] = {}
+
+        new_nodes[node_ids["stream"]] = {
+            "id": node_ids["stream"],
             "type": "StreamSourceNode",
-            "title": f"{plat.capitalize()} Source: #{clean_ch}",
+            "title": f"{plat.capitalize()} Source: #{channel}",
             "category": "stream",
-            "position": [60, base_y + 100],
-            "properties": {"channel": clean_ch, "platform": plat, "simulate": simulate},
+            "position": [60, base_y],
+            "properties": {"channel": channel, "platform": plat, "simulate": simulate},
             "inputs": [],
             "outputs": [
                 {"id": "video", "name": "Video Stream", "type": "video"},
@@ -359,146 +363,142 @@ class GraphDAGManager:
                 {"id": "chat", "name": "Chat Stream", "type": "chat"},
             ],
         }
-        self.nodes[audio_nid] = {
-            "id": audio_nid,
-            "type": "AudioMonitorNode",
-            "title": f"Audio Monitor (#{clean_ch})",
-            "category": "audio",
-            "position": [440, base_y],
-            "properties": {"jump_db_threshold": 12.0, "baseline_adaptation": 0.90},
-            "inputs": [{"id": "audio_in", "name": "Audio In", "type": "audio"}],
-            "outputs": [
-                {"id": "spike_trigger", "name": "Audio Spike", "type": "trigger"},
-                {"id": "live_db", "name": "Current dB", "type": "scalar"},
-            ],
-        }
-        self.nodes[chat_nid] = {
-            "id": chat_nid,
-            "type": "ChatVelocityNode",
-            "title": f"Chat Velocity (#{clean_ch})",
-            "category": "chat",
-            "position": [440, base_y + 210],
-            "properties": {"spike_ratio_threshold": 3.0, "instant_min_threshold": 10.0},
-            "inputs": [{"id": "chat_in", "name": "Chat In", "type": "chat"}],
-            "outputs": [
-                {"id": "spike_trigger", "name": "Chat Spike", "type": "trigger"},
-                {"id": "velocity", "name": "Messages/s", "type": "scalar"},
-            ],
-        }
-        self.nodes[cv_nid] = {
-            "id": cv_nid,
-            "type": "CVTransformerNode",
-            "title": f"Hugging Face Vision (#{clean_ch})",
-            "category": "cv",
-            "position": [440, base_y + 420],
-            "properties": {
-                "candidate_labels": "gameplay action, victory celebration, defeat game over, in-game menu, streamer facecam, brb waiting screen",
-                "trigger_labels": "victory celebration, jackpot win, epic moment",
-                "confidence_threshold": 0.70,
-            },
-            "inputs": [{"id": "video_in", "name": "Video In", "type": "video"}],
-            "outputs": [
-                {"id": "spike_trigger", "name": "Vision Trigger", "type": "trigger"},
-                {"id": "confidence", "name": "Top Confidence", "type": "scalar"},
-                {"id": "top_label", "name": "Top Class", "type": "text"},
-            ],
-        }
-        self.nodes[ocr_nid] = {
-            "id": ocr_nid,
-            "type": "OCRVisionNode",
-            "title": f"OCR Engine (#{clean_ch})",
-            "category": "ocr",
-            "position": [440, base_y + 720],
-            "properties": {
-                "multiplier_threshold": 100.0,
-                "roi": {"x": 0.70, "y": 0.85, "w": 0.28, "h": 0.12},
-            },
-            "inputs": [{"id": "video_in", "name": "Video In", "type": "video"}],
-            "outputs": [
-                {"id": "ocr_trigger", "name": "Win Trigger", "type": "trigger"},
-                {"id": "multiplier", "name": "Multiplier", "type": "scalar"},
-            ],
-        }
-        self.nodes[gate_nid] = {
-            "id": gate_nid,
-            "type": "GateEvaluatorNode",
-            "title": f"Gate Evaluator (#{clean_ch})",
-            "category": "gate",
-            "position": [820, base_y + 160],
-            "properties": {
-                "mode": "WEIGHTED_SCORE",
-                "min_score": 4,
-                "debounce_seconds": 30.0,
-                "post_event_delay": 10.0,
-            },
-            "inputs": [
-                {"id": "trigger_1", "name": "Audio Trigger In", "type": "trigger"},
-                {"id": "trigger_2", "name": "Chat Trigger In", "type": "trigger"},
-                {"id": "trigger_3", "name": "OCR Trigger In", "type": "trigger"},
-                {"id": "trigger_4", "name": "Vision Trigger In", "type": "trigger"},
-            ],
-            "outputs": [
-                {"id": "clip_trigger", "name": "Clip Trigger Out", "type": "trigger"},
-                {"id": "score", "name": "Evaluated Score", "type": "scalar"},
-            ],
-        }
-        self.nodes[slicer_nid] = {
-            "id": slicer_nid,
-            "type": "SegmentSlicerNode",
-            "title": f"Rolling Slicer (#{clean_ch})",
-            "category": "slicer",
-            "position": [1180, base_y + 160],
-            "properties": {"window_seconds": 60},
-            "inputs": [
-                {"id": "video_in", "name": "Video In", "type": "video"},
-                {"id": "trigger_in", "name": "Trigger In", "type": "trigger"},
-            ],
-            "outputs": [
-                {"id": "candidate_slice", "name": "Raw Candidate Slice", "type": "video"},
-            ],
-        }
-        self.nodes[render_nid] = {
-            "id": render_nid,
-            "type": "HardwareRenderNode",
-            "title": f"Hardware Renderer (#{clean_ch})",
-            "category": "render",
-            "position": [1520, base_y + 160],
-            "properties": {"crop_vertical": False, "enable_subs": False, "encoder": "auto"},
-            "inputs": [{"id": "candidate_in", "name": "Candidate Video", "type": "video"}],
-            "outputs": [{"id": "clip_asset", "name": "Finished MP4 Clip", "type": "clip"}],
-        }
-        if not folder_node:
-            self.nodes[folder_nid] = {
-                "id": folder_nid,
-                "type": "ClipFolderNode",
-                "title": f"Clip Folder: Highlight Reels",
-                "category": "storage",
-                "position": [1880, base_y + 160],
-                "properties": {
-                    "folder_name": "Highlight Reels",
-                    "date": time.strftime("%Y-%m-%d"),
-                },
-                "inputs": [{"id": "clip_in", "name": "Clip In", "type": "clip"}],
-                "outputs": [],
+
+        present = [c for c in categories if c != "folder" and c in CATEGORY_DEFS]
+        folder_requested = "folder" in categories
+
+        for cat in present:
+            cat_def = CATEGORY_DEFS[cat]
+            nid = f"node_{cat}_{suffix}"
+            node_ids[cat] = nid
+            x_off, y_off = CATEGORY_LAYOUT[cat]
+            props = dict(cat_def["properties"])
+            props.update(property_overrides.get(cat, {}))
+
+            if cat == "gate":
+                inputs = []
+                for idx, (src_cat, _out_port, label) in enumerate(GATE_TRIGGER_SOURCES, start=1):
+                    if src_cat in present:
+                        inputs.append({"id": f"trigger_{idx}", "name": label, "type": "trigger"})
+            else:
+                inputs = copy.deepcopy(cat_def["inputs"])
+
+            new_nodes[nid] = {
+                "id": nid,
+                "type": cat_def["type"],
+                "title": f"{cat_def['title']} (#{channel})",
+                "category": cat,
+                "position": [x_off, base_y + y_off],
+                "properties": props,
+                "inputs": inputs,
+                "outputs": copy.deepcopy(cat_def["outputs"]),
             }
 
-        # Generate wires for this new sequence
-        new_wires = [
-            {"id": f"w_{suffix}_1", "from": f"{stream_nid}:audio", "to": f"{audio_nid}:audio_in", "type": "audio"},
-            {"id": f"w_{suffix}_2", "from": f"{stream_nid}:chat", "to": f"{chat_nid}:chat_in", "type": "chat"},
-            {"id": f"w_{suffix}_3", "from": f"{stream_nid}:video", "to": f"{ocr_nid}:video_in", "type": "video"},
-            {"id": f"w_{suffix}_4", "from": f"{stream_nid}:video", "to": f"{slicer_nid}:video_in", "type": "video"},
-            {"id": f"w_{suffix}_5", "from": f"{audio_nid}:spike_trigger", "to": f"{gate_nid}:trigger_1", "type": "trigger"},
-            {"id": f"w_{suffix}_6", "from": f"{chat_nid}:spike_trigger", "to": f"{gate_nid}:trigger_2", "type": "trigger"},
-            {"id": f"w_{suffix}_7", "from": f"{ocr_nid}:ocr_trigger", "to": f"{gate_nid}:trigger_3", "type": "trigger"},
-            {"id": f"w_{suffix}_8", "from": f"{gate_nid}:clip_trigger", "to": f"{slicer_nid}:trigger_in", "type": "trigger"},
-            {"id": f"w_{suffix}_9", "from": f"{slicer_nid}:candidate_slice", "to": f"{render_nid}:candidate_in", "type": "video"},
-            {"id": f"w_{suffix}_10", "from": f"{stream_nid}:video", "to": f"{cv_nid}:video_in", "type": "video"},
-            {"id": f"w_{suffix}_11", "from": f"{cv_nid}:spike_trigger", "to": f"{gate_nid}:trigger_4", "type": "trigger"},
-            {"id": f"w_{suffix}_12", "from": f"{render_nid}:clip_asset", "to": f"{folder_nid}:clip_in", "type": "clip"},
-        ]
-        self.wires.extend(new_wires)
+        folder_nid = None
+        if folder_requested:
+            existing_folder = next((n for n in self.nodes.values() if n.get("type") == "ClipFolderNode"), None)
+            if existing_folder:
+                folder_nid = existing_folder["id"]
+            else:
+                folder_nid = f"node_folder_{suffix}"
+                fdef = CATEGORY_DEFS["folder"]
+                x_off, y_off = CATEGORY_LAYOUT["folder"]
+                new_nodes[folder_nid] = {
+                    "id": folder_nid,
+                    "type": fdef["type"],
+                    "title": fdef["title"],
+                    "category": "folder",
+                    "position": [x_off, base_y + y_off],
+                    "properties": {"folder_name": "Highlight Reels", "date": time.strftime("%Y-%m-%d")},
+                    "inputs": copy.deepcopy(fdef["inputs"]),
+                    "outputs": [],
+                }
+            node_ids["folder"] = folder_nid
 
+        new_wires: List[dict] = []
+        wire_i = 0
+        for src_cat, src_port, dst_cat, dst_port in BASE_WIRE_DEFS:
+            if src_cat not in node_ids or dst_cat not in node_ids:
+                continue
+            wire_i += 1
+            new_wires.append({
+                "id": f"w_{suffix}_{wire_i}",
+                "from": f"{node_ids[src_cat]}:{src_port}",
+                "to": f"{node_ids[dst_cat]}:{dst_port}",
+                "type": self._port_type(new_nodes[node_ids[src_cat]], src_port, "outputs"),
+            })
+
+        if "gate" in node_ids:
+            gate_nid = node_ids["gate"]
+            trig_idx = 0
+            for src_cat, src_port, _label in GATE_TRIGGER_SOURCES:
+                if src_cat not in node_ids:
+                    continue
+                trig_idx += 1
+                new_wires.append({
+                    "id": f"w_{suffix}_gate_{trig_idx}",
+                    "from": f"{node_ids[src_cat]}:{src_port}",
+                    "to": f"{gate_nid}:trigger_{trig_idx}",
+                    "type": "trigger",
+                })
+
+        return new_nodes, new_wires
+
+    def add_stream_pipeline(
+        self,
+        channel: str,
+        platform: str = "twitch",
+        auto_sequence: bool = True,
+        simulate: bool = False,
+        preset: Optional[str] = None,
+    ) -> dict:
+        """Adds a stream: a bare source node in manual mode, or a full preset-driven pipeline."""
+        from services.ingest.stream_buffer import clean_channel_name
+        clean_ch = clean_channel_name(channel)
+        plat = str(platform or "twitch").lower()
+
+        existing_stream_node = None
+        for nid, n in self.nodes.items():
+            if n.get("type") == "StreamSourceNode" and clean_channel_name(n.get("properties", {}).get("channel", "")) == clean_ch:
+                existing_stream_node = n
+                break
+        if existing_stream_node:
+            return self.get_graph()
+
+        base_y = 160 if not self.nodes else max(n.get("position", [0, 0])[1] for n in self.nodes.values()) + 340
+
+        if not auto_sequence:
+            # Manual mode: just drop in a bare StreamSourceNode with no wires.
+            new_id = f"node_stream_{clean_ch}"
+            self.nodes[new_id] = {
+                "id": new_id,
+                "type": "StreamSourceNode",
+                "title": f"{plat.capitalize()} Source: #{clean_ch}",
+                "category": "stream",
+                "position": [60, base_y],
+                "properties": {"channel": clean_ch, "platform": plat, "simulate": simulate},
+                "inputs": [],
+                "outputs": [
+                    {"id": "video", "name": "Video Stream", "type": "video"},
+                    {"id": "audio", "name": "Audio Stream", "type": "audio"},
+                    {"id": "chat", "name": "Chat Stream", "type": "chat"},
+                ],
+            }
+            self.last_sync_time = time.time()
+            self._apply_graph_to_orchestrator()
+            return self.get_graph()
+
+        preset_def = self.get_preset_definition(preset) or BUILTIN_PRESETS[DEFAULT_PRESET_ID]
+        new_nodes, new_wires = self._instantiate_pipeline(
+            categories=preset_def["categories"],
+            channel=clean_ch,
+            plat=plat,
+            simulate=simulate,
+            base_y=base_y,
+            property_overrides=preset_def.get("property_overrides"),
+        )
+        self.nodes.update(new_nodes)
+        self.wires.extend(new_wires)
         self.last_sync_time = time.time()
         self._apply_graph_to_orchestrator()
         return self.get_graph()
@@ -507,9 +507,7 @@ class GraphDAGManager:
         """Removes a stream node and every worker node exclusively wired to it.
 
         Traces the DAG by following wires rather than assuming any node-ID naming
-        convention: the first stream ever added reuses the default template's bare
-        IDs (node_audio, node_chat, ...) while later streams get channel-suffixed
-        IDs, so ID-substring matching alone misses the former and leaves it orphaned.
+        convention, so it works regardless of which preset built the pipeline.
         """
         from services.ingest.stream_buffer import clean_channel_name
         clean_ch = clean_channel_name(channel)
@@ -527,21 +525,8 @@ class GraphDAGManager:
             if n.get("type") == "StreamSourceNode" and nid not in target_stream_ids
         }
 
-        def reachable_from(seed_ids: Set[str]) -> Set[str]:
-            seen = set(seed_ids)
-            queue = deque(seed_ids)
-            while queue:
-                cur = queue.popleft()
-                for wire in self.wires:
-                    src = wire.get("from", "").split(":")[0]
-                    dst = wire.get("to", "").split(":")[0]
-                    if src == cur and dst not in seen:
-                        seen.add(dst)
-                        queue.append(dst)
-            return seen
-
-        reachable_from_target = reachable_from(target_stream_ids)
-        reachable_from_others = reachable_from(other_stream_ids) if other_stream_ids else set()
+        reachable_from_target = self._reachable_from(target_stream_ids)
+        reachable_from_others = self._reachable_from(other_stream_ids) if other_stream_ids else set()
 
         # Never remove a node still reachable from another active stream
         # (e.g. a shared ClipFolderNode wired from multiple renderers).
@@ -554,11 +539,6 @@ class GraphDAGManager:
             w for w in self.wires
             if w["from"].split(":")[0] not in nodes_to_remove and w["to"].split(":")[0] not in nodes_to_remove
         ]
-
-        # If all stream nodes were removed, recreate empty stream source node placeholder
-        stream_nodes = [n for n in self.nodes.values() if n.get("type") == "StreamSourceNode"]
-        if not stream_nodes:
-            self.load_default_template(channel="marlon")
 
         self.last_sync_time = time.time()
         self._apply_graph_to_orchestrator()
@@ -1071,10 +1051,13 @@ class GraphDAGManager:
                 last_trig = getattr(session.gate_evaluator, "last_trigger_time", 0.0) if session.gate_evaluator else 0.0
                 is_debouncing = (time.time() - last_trig < debounce_sec) if last_trig > 0 else False
                 debounce_remaining = max(0.0, (last_trig + debounce_sec) - time.time()) if is_debouncing else 0.0
+                arm_status = session.gate_evaluator.get_arm_status() if session.gate_evaluator else {"is_arming": False, "arm_remaining_seconds": 0.0}
                 payload[node_id] = {
                     "score": getattr(session.gate_evaluator, "current_score", 1),
                     "is_debouncing": is_debouncing,
                     "debounce_remaining": debounce_remaining,
+                    "is_arming": arm_status["is_arming"],
+                    "arm_remaining_seconds": arm_status["arm_remaining_seconds"],
                     "source_channel": session.channel,
                 }
 
