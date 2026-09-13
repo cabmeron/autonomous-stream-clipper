@@ -1796,6 +1796,13 @@
       z-index: 5;
       pointer-events: none;
     }
+    /* .radar-empty-state sets display:flex with the same specificity as the browser's
+       default [hidden] rule, and author CSS always wins over the UA stylesheet - so the
+       hidden attribute alone never actually hid this element. An ID+attribute selector
+       outranks a class selector, so this reliably wins the cascade either way. */
+    #graph-empty-state[hidden] {
+      display: none;
+    }
 
   </style>
 </head>
