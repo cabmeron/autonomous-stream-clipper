@@ -15,6 +15,8 @@ from services.orchestrator_dag import GraphDAGManager
 # ==========================================
 
 def test_streamer_emotion_basic_analysis():
+    from services.heuristics.streamer_emotion import FERPLUS_CLASSES
+
     svc = StreamerEmotionService()
     
     # Create test image 640x360
@@ -22,13 +24,13 @@ def test_streamer_emotion_basic_analysis():
     metrics = svc.process_frame(img)
 
     assert "top_emotion" in metrics
-    assert metrics["top_emotion"] in EMOTION_CLASSES
+    assert metrics["top_emotion"] in FERPLUS_CLASSES or metrics["top_emotion"] in EMOTION_CLASSES
     assert -1.0 <= metrics["valence"] <= 1.0
     assert 0.0 <= metrics["arousal"] <= 1.0
     assert 0.0 <= metrics["tilt_score"] <= 100.0
     assert 0.0 <= metrics["euphoria_score"] <= 100.0
     assert "emotions" in metrics
-    assert len(metrics["emotions"]) == len(EMOTION_CLASSES)
+    assert len(metrics["emotions"]) in (len(FERPLUS_CLASSES), len(EMOTION_CLASSES))
 
 
 def test_streamer_emotion_roi_clamping_and_crop():
@@ -261,7 +263,6 @@ def test_dag_gambling_nodes_hot_reload():
         "properties": {
             "tilt_threshold": 65.0,
             "euphoria_threshold": 75.0,
-            "face_roi": {"x": 0.02, "y": 0.05, "w": 0.22, "h": 0.28},
         },
         "inputs": [{"id": "video_in", "name": "Video Frame", "type": "video"}],
         "outputs": [
@@ -270,20 +271,18 @@ def test_dag_gambling_nodes_hot_reload():
         ],
     }
 
-    # Add GamblingOCRNode to graph
-    mgr.nodes["node_gambling_ocr"] = {
-        "id": "node_gambling_ocr",
-        "type": "GamblingOCRNode",
-        "title": "Gambling OCR HUD",
+    # Add VideoCropNode to graph
+    mgr.nodes["node_crop"] = {
+        "id": "node_crop",
+        "type": "VideoCropNode",
+        "title": "Slot HUD Crop",
         "properties": {
-            "preset": "pragmatic_standard",
-            "rois": {
-                "balance": {"x": 0.05, "y": 0.92, "w": 0.18, "h": 0.06},
-            }
+            "preset": "slot_hud",
+            "roi": {"x": 0.05, "y": 0.92, "w": 0.18, "h": 0.06},
         },
         "inputs": [{"id": "video_in", "name": "Video Frame", "type": "video"}],
         "outputs": [
-            {"id": "win_trigger", "name": "Win Trigger", "type": "trigger"},
+            {"id": "video_out", "name": "Cropped Video", "type": "video"},
         ],
     }
 
@@ -291,7 +290,168 @@ def test_dag_gambling_nodes_hot_reload():
     assert mgr.update_node_param("node_face", "tilt_threshold", 75.0) is True
     assert mgr.nodes["node_face"]["properties"]["tilt_threshold"] == 75.0
 
-    # Test nested ROI parameter update
+    # Test ROI parameter update on VideoCropNode
     new_bal_roi = {"x": 0.10, "y": 0.88, "w": 0.20, "h": 0.08}
-    assert mgr.update_node_param("node_gambling_ocr", "roi_balance", new_bal_roi) is True
-    assert mgr.nodes["node_gambling_ocr"]["properties"]["rois"]["balance"] == new_bal_roi
+    assert mgr.update_node_param("node_crop", "roi", new_bal_roi) is True
+    assert mgr.nodes["node_crop"]["properties"]["roi"] == new_bal_roi
+
+
+def test_video_crop_to_emotion_classifier_roi_propagation():
+    """Verifies VideoCropNode wiring to FacecamEmotionNode propagates ROI and generates cropped face thumbnail."""
+    svc = StreamerEmotionService()
+    img = Image.new("RGB", (640, 360), color=(120, 80, 70))
+    metrics = svc.process_frame(img)
+    assert "face_thumbnail_b64" in metrics
+    assert metrics["face_thumbnail_b64"].startswith("data:image/jpeg;base64,")
+
+    # Set up mock session and orchestrator
+    class MockSession:
+        def __init__(self):
+            self.channel = "tarik"
+            self.buffer = None
+            self.streamer_emotion = StreamerEmotionService()
+            self.extra_telemetry = {
+                "stream_frame_b64": "data:image/jpeg;base64,full_frame",
+                "emotion_thumbnail_b64": "data:image/jpeg;base64,cropped_face",
+            }
+
+    class MockOrchestrator:
+        def __init__(self):
+            self.sessions = {"tarik": MockSession()}
+
+    mgr = GraphDAGManager(orchestrator=MockOrchestrator())
+    # Add StreamSourceNode
+    mgr.nodes["src"] = {
+        "id": "src",
+        "type": "StreamSourceNode",
+        "properties": {"channel": "tarik"},
+        "outputs": [{"id": "video", "type": "video"}],
+    }
+    # Add VideoCropNode
+    crop_roi = {"x": 0.76, "y": 0.05, "w": 0.22, "h": 0.28}
+    mgr.nodes["crop"] = {
+        "id": "crop",
+        "type": "VideoCropNode",
+        "properties": {"roi": crop_roi},
+        "inputs": [{"id": "video_in", "type": "video"}],
+        "outputs": [{"id": "video_out", "type": "video"}],
+    }
+    # Add FacecamEmotionNode
+    mgr.nodes["face"] = {
+        "id": "face",
+        "type": "FacecamEmotionNode",
+        "properties": {},
+        "inputs": [{"id": "video_in", "type": "video"}],
+        "outputs": [{"id": "tilt_score", "type": "score"}],
+    }
+    # Connect src -> crop -> face
+    mgr.wires = [
+        {"id": "w1", "from": "src:video", "to": "crop:video_in", "type": "video"},
+        {"id": "w2", "from": "crop:video_out", "to": "face:video_in", "type": "video"},
+    ]
+
+    # Apply to orchestrator
+    mgr._apply_graph_to_orchestrator()
+
+    session = mgr.orchestrator.sessions["tarik"]
+    assert session.streamer_emotion.face_roi["x"] == 0.76
+    assert session.streamer_emotion.face_roi["y"] == 0.05
+    assert session.streamer_emotion.face_roi["w"] == 0.22
+    assert session.streamer_emotion.face_roi["h"] == 0.28
+
+    # Verify telemetry payload prefers cropped thumbnail
+    payload = mgr.get_node_telemetry_payload()
+    assert "face" in payload
+    assert payload["face"]["stream_frame_b64"] == "data:image/jpeg;base64,cropped_face"
+    assert payload["face"]["face_thumbnail_b64"] == "data:image/jpeg;base64,cropped_face"
+
+
+def test_ferplus_onnx_model_loading_and_8_classes():
+    """Verifies Microsoft FERPlus 8-class ONNX inference, tensor shape, and metric computation."""
+    from services.heuristics.streamer_emotion import StreamerEmotionService, FERPLUS_CLASSES
+
+    svc = StreamerEmotionService(model_name="ferplus")
+    assert svc.model_name == "ferplus"
+    assert svc.ferplus_net is not None or svc.ort_ferplus_session is not None
+
+    test_frame = Image.new("RGB", (320, 240), color=(120, 110, 100))
+    metrics = svc.process_frame(test_frame)
+
+    assert "emotions" in metrics
+    for cls_name in FERPLUS_CLASSES:
+        assert cls_name in metrics["emotions"]
+        assert 0.0 <= metrics["emotions"][cls_name] <= 1.0
+
+    assert len(metrics["emotions"]) == 8
+    prob_sum = sum(metrics["emotions"].values())
+    assert 0.98 <= prob_sum <= 1.02
+
+    assert "raw_logits" in metrics
+    assert len(metrics["raw_logits"]) == 8
+    for cls_name in FERPLUS_CLASSES:
+        assert cls_name in metrics["raw_logits"]
+        assert isinstance(metrics["raw_logits"][cls_name], float)
+
+    assert -1.0 <= metrics["valence"] <= 1.0
+    assert 0.0 <= metrics["arousal"] <= 1.0
+    assert 0.0 <= metrics["tilt_score"] <= 100.0
+    assert 0.0 <= metrics["euphoria_score"] <= 100.0
+    assert metrics["latency_ms"] >= 0.0
+    assert metrics["model"] == "ferplus"
+
+
+def test_ferplus_tilt_and_contempt_metric():
+    """Verifies that contempt and anger directly elevate the calculated tilt index."""
+    from services.heuristics.streamer_emotion import StreamerEmotionService
+
+    svc = StreamerEmotionService(model_name="ferplus")
+
+    # Calm / happy baseline
+    calm_probs = {"happiness": 0.85, "neutral": 0.10, "arousal": 0.4}
+    tilt_calm = svc.compute_tilt_score(calm_probs)
+
+    # Frustrated with contempt & anger
+    tilt_probs = {"anger": 0.60, "contempt": 0.30, "disgust": 0.05, "sadness": 0.05, "arousal": 0.8}
+    tilt_spiked = svc.compute_tilt_score(tilt_probs)
+
+    assert tilt_spiked > tilt_calm
+    assert tilt_spiked >= 35.0  # Significant tilt pressure
+
+
+def test_dag_emotion_model_hot_reload():
+    """Verifies that switching model from 'ferplus' to 'mobilefacenet' dynamically updates DAG session."""
+    class MockSession:
+        def __init__(self):
+            self.channel = "shroud"
+            self.streamer_emotion = StreamerEmotionService(model_name="ferplus")
+            self.extra_telemetry = {}
+
+    class MockOrchestrator:
+        def __init__(self):
+            self.sessions = {"shroud": MockSession()}
+
+    mgr = GraphDAGManager(orchestrator=MockOrchestrator())
+    mgr.nodes["face_node"] = {
+        "id": "face_node",
+        "type": "FacecamEmotionNode",
+        "properties": {"model": "ferplus"},
+        "inputs": [{"id": "video_in", "type": "video"}],
+        "outputs": [{"id": "tilt_score", "type": "score"}],
+    }
+    mgr.nodes["src"] = {
+        "id": "src",
+        "type": "StreamSourceNode",
+        "properties": {"channel": "shroud"},
+        "outputs": [{"id": "video", "type": "video"}],
+    }
+    mgr.wires = [{"id": "w1", "from": "src:video", "to": "face_node:video_in", "type": "video"}]
+
+    mgr._apply_graph_to_orchestrator()
+    session = mgr.orchestrator.sessions["shroud"]
+    assert session.streamer_emotion.model_name == "ferplus"
+
+    # Hot reload model to mobilefacenet
+    assert mgr.update_node_param("face_node", "model", "mobilefacenet") is True
+    mgr._apply_graph_to_orchestrator()
+    assert session.streamer_emotion.model_name == "mobilefacenet"
+

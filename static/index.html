@@ -2114,7 +2114,7 @@
       <div class="radar-controls-bar">
         <div class="radar-input-group">
           <span class="radar-input-prefix">#</span>
-          <input id="radar-channel-input" type="text" placeholder="target channel (e.g. marlon, zarbex)" onkeydown="if(event.key==='Enter') runWatchPartyDiscovery(false);" />
+          <input id="radar-channel-input" type="text" placeholder="target channel (e.g. shroud, tarik)" onkeydown="if(event.key==='Enter') runWatchPartyDiscovery(false);" />
         </div>
         <div class="radar-action-buttons">
           <button id="btn-radar-scan" class="btn-radar-primary" onclick="runWatchPartyDiscovery(false)">
@@ -2219,7 +2219,21 @@
 
     <!-- Right-Click / Search Spawn Palette -->
     <div id="node-spawn-palette">
-      <input type="text" class="spawn-search" placeholder="Search node catalog..." />
+      <div class="spawn-header">
+        <div class="spawn-search-wrapper">
+          <span class="spawn-search-icon">🔍</span>
+          <input type="text" class="spawn-search" placeholder="Search nodes, tags (e.g. audio, in:video)..." />
+          <button class="spawn-clear-btn" title="Clear search">✕</button>
+        </div>
+        <div class="spawn-filter-pills">
+          <button class="spawn-pill active" data-filter="all">All</button>
+          <button class="spawn-pill" data-filter="in:audio">🔊 Audio In</button>
+          <button class="spawn-pill" data-filter="in:video">🎬 Video In</button>
+          <button class="spawn-pill" data-filter="in:chat">💬 Chat In</button>
+          <button class="spawn-pill" data-filter="out:trigger">⚡ Triggers</button>
+          <button class="spawn-pill" data-filter="stage:render,stage:storage">💾 Export</button>
+        </div>
+      </div>
       <div class="spawn-list"></div>
     </div>
   </div>
@@ -3548,10 +3562,12 @@
     function openWatchPartyModal(targetChannel) {
       const modal = document.getElementById("watch-party-modal");
       const input = document.getElementById("radar-channel-input");
-      const defaultChan = sanitizeChannelName(targetChannel || activeTab || (Object.keys(activeSessions)[0] || "marlon"));
+      const defaultChan = sanitizeChannelName(targetChannel || activeTab || (Object.keys(activeSessions)[0] || ""));
       if (input) input.value = defaultChan;
       if (modal) modal.classList.add("active");
-      runWatchPartyDiscovery(false);
+      if (defaultChan) {
+        runWatchPartyDiscovery(false);
+      }
     }
 
     function closeWatchPartyModal() {
@@ -3579,8 +3595,12 @@
     async function runWatchPartyDiscovery(forceSim = false) {
       if (isRadarScanning) return;
       const input = document.getElementById("radar-channel-input");
-      const channel = sanitizeChannelName(input ? input.value : activeTab) || "marlon";
+      const channel = sanitizeChannelName(input ? input.value : activeTab) || "";
       if (input) input.value = channel;
+      if (!channel) {
+        showToast("Please enter a target channel", true);
+        return;
+      }
 
       const scanningStage = document.getElementById("radar-scanning-stage");
       const statsBar = document.getElementById("radar-stats-bar");
@@ -4271,13 +4291,13 @@
       if (window.NodeStudio) {
         const registeredRois = [];
         window.NodeStudio.nodes.forEach((n) => {
-          if (n.type === "FacecamEmotionNode") {
+          if (n.type === "VideoCropNode") {
             registeredRois.push({
               nodeId: n.id,
-              paramKey: "face_roi",
-              label: "Facecam",
-              color: "#06b6d4",
-              roi: n.properties?.face_roi || { x: 0.02, y: 0.05, w: 0.22, h: 0.28 },
+              paramKey: "roi",
+              label: "Video Crop",
+              color: "#f43f5e",
+              roi: n.properties?.roi || { x: 0.02, y: 0.05, w: 0.22, h: 0.28 },
             });
           }
         });

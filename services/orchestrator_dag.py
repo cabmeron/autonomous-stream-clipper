@@ -39,17 +39,18 @@ COMPATIBLE_TYPES = {
 class GraphDAGManager:
     """Manages the visual node graph topology, dynamic stream routing, and parameter mutators."""
 
-    def __init__(self, orchestrator=None):
+    def __init__(self, orchestrator=None, load_template: bool = False):
         self.orchestrator = orchestrator
         self.graph_id = "default_studio_graph"
         self.nodes: Dict[str, dict] = {}
         self.wires: List[dict] = []  # List of {"id": str, "from": str, "to": str, "type": str}
         self.last_sync_time = time.time()
 
-        # Initialize default graph topology
-        self.load_default_template()
+        # Initialize graph topology: empty by default, or populated if requested
+        if load_template:
+            self.load_default_template()
 
-    def load_default_template(self, channel: str = "marlon", simulate: bool = False):
+    def load_default_template(self, channel: str = "stream", simulate: bool = False):
         """Builds a classic ComfyUI workflow template connecting stream sources to heuristics and clipping."""
         self.nodes = {
             "node_stream": {
@@ -255,18 +256,10 @@ class GraphDAGManager:
                 existing_stream_node = n
                 break
 
-        # Check if the graph only contains the initial default template ("marlon" placeholder not in active sessions)
-        stream_nodes = [n for n in self.nodes.values() if n.get("type") == "StreamSourceNode"]
-        is_default_placeholder = (
-            len(stream_nodes) == 1
-            and clean_channel_name(stream_nodes[0].get("properties", {}).get("channel", "")) == "marlon"
-            and (not self.orchestrator or "marlon" not in getattr(self.orchestrator, "sessions", {}))
-        )
-
         if not auto_sequence:
             # Mode: Stream only -> User builds nodes manually
-            if is_default_placeholder:
-                # Replace the initial placeholder template with just this single StreamSourceNode
+            if not self.nodes or len(self.nodes) == 0:
+                # First node in empty graph: single isolated StreamSourceNode
                 self.nodes = {
                     "node_stream": {
                         "id": "node_stream",
@@ -315,8 +308,8 @@ class GraphDAGManager:
             return self.get_graph()
 
         # Mode: auto_sequence is True -> Generate complete clipping pipeline
-        if is_default_placeholder:
-            # Reconfigure the default template for the new stream
+        if not self.nodes or len(self.nodes) == 0:
+            # Configure default pipeline template for this stream
             self.load_default_template(channel=clean_ch, simulate=simulate)
             if "node_stream" in self.nodes:
                 self.nodes["node_stream"]["properties"]["platform"] = plat
@@ -523,10 +516,11 @@ class GraphDAGManager:
             if w["from"].split(":")[0] not in nodes_to_remove and w["to"].split(":")[0] not in nodes_to_remove
         ]
 
-        # If all stream nodes were removed, recreate empty stream source node placeholder
+        # If all stream nodes were removed, clear graph cleanly
         stream_nodes = [n for n in self.nodes.values() if n.get("type") == "StreamSourceNode"]
         if not stream_nodes:
-            self.load_default_template(channel="marlon")
+            self.nodes = {}
+            self.wires = []
 
         self.last_sync_time = time.time()
         self._apply_graph_to_orchestrator()
@@ -633,19 +627,9 @@ class GraphDAGManager:
         node["properties"][param] = value
         if node.get("type") == "StreamSourceNode":
             if param in ("channel", "platform"):
-                ch = node["properties"].get("channel", "marlon")
+                ch = node["properties"].get("channel", "stream")
                 plat = str(node["properties"].get("platform", "twitch")).capitalize()
                 node["title"] = f"{plat} Source: #{ch}"
-        if node.get("type") == "GamblingOCRNode" and param.startswith("roi_"):
-            rkey = param.replace("roi_", "")
-            if "rois" not in node["properties"] or not isinstance(node["properties"]["rois"], dict):
-                node["properties"]["rois"] = {}
-            node["properties"]["rois"][rkey] = value
-        if node.get("type") == "OCRVisionNode" and param == "slot_preset":
-            channel = self.nodes.get("node_stream", {}).get("properties", {}).get("channel")
-            session = self.orchestrator.sessions.get(channel) if (self.orchestrator and channel) else None
-            if session and getattr(session, "dynamic_ocr", None):
-                session.dynamic_ocr.apply_slot_preset(str(value))
         if node.get("type") == "ClipFolderNode" and param == "folder_name":
             node["title"] = f"Clip Folder: {value}"
 
@@ -766,6 +750,42 @@ class GraphDAGManager:
         for node_id, node in self.nodes.items():
             ntype = node.get("type")
             props = node.get("properties", {})
+
+            if ntype == "ThresholdGateNode":
+                if "rules" not in props:
+                    props["rules"] = {}
+                for inp in node.get("inputs", []):
+                    port_id = inp["id"]
+                    if port_id not in props["rules"]:
+                        props["rules"][port_id] = {
+                            "operator": ">=",
+                            "threshold": 0.5,
+                            "min": 0.0,
+                            "max": 1.0,
+                            "step": 0.01,
+                            "unit": "",
+                            "label": inp.get("name", port_id),
+                        }
+                    # Inherit range metadata from incoming wire if available
+                    for wire in self.wires:
+                        if wire.get("to") == f"{node_id}:{port_id}":
+                            src_id, src_port_id = wire.get("from", "").split(":")
+                            src_node = self.nodes.get(src_id)
+                            if src_node:
+                                src_port = next((p for p in src_node.get("outputs", []) if p["id"] == src_port_id), None)
+                                if src_port:
+                                    rule = props["rules"][port_id]
+                                    rule["label"] = src_port.get("name", port_id)
+                                    if "min" in src_port:
+                                        rule["min"] = src_port["min"]
+                                    if "max" in src_port:
+                                        rule["max"] = src_port["max"]
+                                    if "step" in src_port:
+                                        rule["step"] = src_port["step"]
+                                    if "unit" in src_port:
+                                        rule["unit"] = src_port["unit"]
+                continue
+
             session = self.get_node_source_session(node_id)
             if not session:
                 continue
@@ -808,26 +828,115 @@ class GraphDAGManager:
                     trigs_list = [l.strip() for l in raw_trigs.split(",") if l.strip()] if isinstance(raw_trigs, str) else raw_trigs
                     session.cv_service.set_trigger_labels(trigs_list)
 
+            elif ntype == "VideoCropNode":
+                crop_roi = props.get("roi") or {
+                    "x": float(props.get("x", 0.02)),
+                    "y": float(props.get("y", 0.05)),
+                    "w": float(props.get("w", 0.22)),
+                    "h": float(props.get("h", 0.28)),
+                }
+                # Propagate cropped ROI to downstream nodes wired to this VideoCropNode
+                downstream_targets = [
+                    w["to"].split(":")[0] for w in self.wires
+                    if w.get("from", "").startswith(f"{node_id}:")
+                ]
+                for target_id in downstream_targets:
+                    target_node = self.nodes.get(target_id)
+                    if target_node:
+                        t_type = target_node.get("type")
+                        if t_type == "ImageScaleNode" and getattr(session, "image_scaler", None):
+                            session.image_scaler.crop_roi = crop_roi
+                            # Propagate further to nodes downstream of ImageScaleNode
+                            further_targets = [
+                                w2["to"].split(":")[0] for w2 in self.wires
+                                if w2.get("from", "").startswith(f"{target_id}:")
+                            ]
+                            for f_id in further_targets:
+                                f_node = self.nodes.get(f_id)
+                                if f_node and f_node.get("type") == "FacecamEmotionNode" and getattr(session, "streamer_emotion", None):
+                                    session.streamer_emotion_uses_scaler = True
+                                    session.streamer_emotion.update_roi(0.0, 0.0, 1.0, 1.0)
+                                elif f_node and f_node.get("type") == "OCRVisionNode" and getattr(session, "dynamic_ocr", None):
+                                    session.dynamic_ocr.set_areas([{"id": "cropped_ocr", **crop_roi}])
+                        elif t_type == "FacecamEmotionNode" and getattr(session, "streamer_emotion", None):
+                            session.streamer_emotion_uses_scaler = False
+                            session.streamer_emotion.update_roi(
+                                crop_roi.get("x", 0.02), crop_roi.get("y", 0.05),
+                                crop_roi.get("w", 0.22), crop_roi.get("h", 0.28)
+                            )
+                        elif t_type == "OCRVisionNode" and getattr(session, "dynamic_ocr", None):
+                            session.dynamic_ocr.set_areas([{"id": "cropped_ocr", **crop_roi}])
+
+            elif ntype == "ImageScaleNode" and getattr(session, "image_scaler", None):
+                scale_factor = props.get("scale_factor", 2.0)
+                algorithm = props.get("algorithm", "bicubic")
+                sharpen_strength = props.get("sharpen_strength", 0.5)
+                clahe_clip_limit = props.get("clahe_clip_limit", 2.0)
+                denoise_strength = props.get("denoise_strength", 0.0)
+                target_w = props.get("target_w", 0)
+                target_h = props.get("target_h", 0)
+                session.image_scaler.set_parameters(
+                    scale_factor=scale_factor,
+                    algorithm=algorithm,
+                    sharpen_strength=sharpen_strength,
+                    clahe_clip_limit=clahe_clip_limit,
+                    denoise_strength=denoise_strength,
+                    target_w=target_w,
+                    target_h=target_h,
+                )
+                # Check if there is an upstream VideoCropNode wired to this ImageScaleNode
+                upstream_crop = next((
+                    self.nodes.get(w["from"].split(":")[0])
+                    for w in self.wires
+                    if w.get("to", "").startswith(f"{node_id}:")
+                    and self.nodes.get(w["from"].split(":")[0], {}).get("type") == "VideoCropNode"
+                ), None)
+                if upstream_crop:
+                    c_props = upstream_crop.get("properties", {})
+                    c_roi = c_props.get("roi") or {
+                        "x": float(c_props.get("x", 0.02)),
+                        "y": float(c_props.get("y", 0.05)),
+                        "w": float(c_props.get("w", 0.22)),
+                        "h": float(c_props.get("h", 0.28)),
+                    }
+                    session.image_scaler.crop_roi = c_roi
+                else:
+                    session.image_scaler.crop_roi = None
+
             elif ntype == "FacecamEmotionNode" and getattr(session, "streamer_emotion", None):
+                if "model" in props:
+                    session.streamer_emotion.set_model(props["model"])
                 if "tilt_threshold" in props:
                     session.streamer_emotion.tilt_threshold = float(props["tilt_threshold"])
                 if "euphoria_threshold" in props:
                     session.streamer_emotion.euphoria_threshold = float(props["euphoria_threshold"])
-                if "face_roi" in props and isinstance(props["face_roi"], dict):
-                    r = props["face_roi"]
-                    session.streamer_emotion.update_roi(r.get("x", 0.02), r.get("y", 0.05), r.get("w", 0.22), r.get("h", 0.28))
 
-            elif ntype == "GamblingOCRNode" and getattr(session, "gambling_ocr", None):
-                if "preset" in props:
-                    session.gambling_ocr.set_preset(props["preset"])
-                if "rois" in props and isinstance(props["rois"], dict):
-                    for rkey, rval in props["rois"].items():
-                        if isinstance(rval, dict):
-                            session.gambling_ocr.update_roi(rkey, rval.get("x", 0), rval.get("y", 0), rval.get("w", 0.1), rval.get("h", 0.1))
-                for rk in ("balance", "bet", "win", "reels"):
-                    if f"roi_{rk}" in props and isinstance(props[f"roi_{rk}"], dict):
-                        rv = props[f"roi_{rk}"]
-                        session.gambling_ocr.update_roi(rk, rv.get("x", 0), rv.get("y", 0), rv.get("w", 0.1), rv.get("h", 0.1))
+                # Check upstream nodes for either ImageScaleNode or VideoCropNode
+                upstream_wire = next((
+                    w for w in self.wires
+                    if w.get("to", "").startswith(f"{node_id}:")
+                ), None)
+                if upstream_wire:
+                    up_src_id = upstream_wire["from"].split(":")[0]
+                    up_node = self.nodes.get(up_src_id)
+                    if up_node and up_node.get("type") == "ImageScaleNode":
+                        session.streamer_emotion_uses_scaler = True
+                        session.streamer_emotion.update_roi(0.0, 0.0, 1.0, 1.0)
+                    elif up_node and up_node.get("type") == "VideoCropNode":
+                        session.streamer_emotion_uses_scaler = False
+                        c_props = up_node.get("properties", {})
+                        c_roi = c_props.get("roi") or {
+                            "x": float(c_props.get("x", 0.02)),
+                            "y": float(c_props.get("y", 0.05)),
+                            "w": float(c_props.get("w", 0.22)),
+                            "h": float(c_props.get("h", 0.28)),
+                        }
+                        session.streamer_emotion.update_roi(
+                            c_roi.get("x", 0.02), c_roi.get("y", 0.05),
+                            c_roi.get("w", 0.22), c_roi.get("h", 0.28)
+                        )
+                    else:
+                        session.streamer_emotion_uses_scaler = False
 
             elif ntype == "GamblingLedgerNode" and getattr(session, "gambling_ledger", None):
                 if "starting_balance" in props and props["starting_balance"] is not None:
@@ -917,6 +1026,10 @@ class GraphDAGManager:
                 }
                 continue
 
+            # ThresholdGateNode will be evaluated in second pass after all upstream payloads are computed
+            if node_type == "ThresholdGateNode":
+                continue
+
             # For worker nodes: resolve routed session via wires or explicit channel
             session = self.get_node_source_session(node_id)
             if not session:
@@ -926,8 +1039,9 @@ class GraphDAGManager:
                 }
                 continue
 
-            calc = session.chat_engine.recalculate() if session.chat_engine else {}
-            extra = session.extra_telemetry
+            calc = session.chat_engine.recalculate() if getattr(session, "chat_engine", None) else {}
+            extra = getattr(session, "extra_telemetry", {})
+            props = n.get("properties", {})
 
             if node_type == "AudioMonitorNode":
                 payload[node_id] = {
@@ -959,6 +1073,35 @@ class GraphDAGManager:
                     "slot_metrics": extra.get("slot_metrics") or (session.dynamic_ocr.compute_slot_metrics() if getattr(session, "dynamic_ocr", None) else {}),
                     "source_channel": session.channel,
                 }
+            elif node_type == "VideoCropNode":
+                payload[node_id] = {
+                    "roi": props.get("roi") or {
+                        "x": float(props.get("x", 0.02)),
+                        "y": float(props.get("y", 0.05)),
+                        "w": float(props.get("w", 0.22)),
+                        "h": float(props.get("h", 0.28)),
+                    },
+                    "preset": props.get("preset", "facecam_tl"),
+                    "stream_frame_b64": extra.get("stream_frame_b64", ""),
+                    "source_channel": session.channel,
+                }
+            elif node_type == "ImageScaleNode":
+                scaler = getattr(session, "image_scaler", None)
+                payload[node_id] = {
+                    "scale_factor": props.get("scale_factor", getattr(scaler, "scale_factor", 2.0)),
+                    "algorithm": props.get("algorithm", getattr(scaler, "algorithm", "bicubic")),
+                    "sharpen_strength": props.get("sharpen_strength", getattr(scaler, "sharpen_strength", 0.5)),
+                    "clahe_clip_limit": props.get("clahe_clip_limit", getattr(scaler, "clahe_clip_limit", 2.0)),
+                    "denoise_strength": props.get("denoise_strength", getattr(scaler, "denoise_strength", 0.0)),
+                    "target_w": props.get("target_w", getattr(scaler, "target_w", 0)),
+                    "target_h": props.get("target_h", getattr(scaler, "target_h", 0)),
+                    "input_res": extra.get("scaler_input_res", "—"),
+                    "output_res": extra.get("scaler_output_res", "—"),
+                    "latency_ms": extra.get("scaler_latency_ms", 0.0),
+                    "scaled_thumbnail_b64": extra.get("scaler_thumbnail_b64", ""),
+                    "stream_frame_b64": extra.get("scaler_thumbnail_b64") or extra.get("stream_frame_b64", ""),
+                    "source_channel": session.channel,
+                }
             elif node_type == "CVTransformerNode":
                 payload[node_id] = {
                     "top_label": extra.get("cv_top_label", "standby"),
@@ -972,28 +1115,34 @@ class GraphDAGManager:
                     "source_channel": session.channel,
                 }
             elif node_type == "FacecamEmotionNode":
+                face_b64 = extra.get("emotion_thumbnail_b64") or extra.get("stream_frame_b64", "")
+                emotions = extra.get("emotion_distribution", {})
+                if getattr(session, "streamer_emotion", None):
+                    get_met = session.streamer_emotion.get_metric_value
+                else:
+                    get_met = lambda k: float(emotions.get(k, 0.0))
                 payload[node_id] = {
                     "top_emotion": extra.get("emotion_top", "neutral"),
                     "confidence": extra.get("emotion_confidence", 0.0),
-                    "emotions": extra.get("emotion_distribution", {}),
+                    "emotions": emotions,
+                    "raw_logits": extra.get("emotion_raw_logits", {}),
                     "valence": extra.get("emotion_valence", 0.0),
                     "arousal": extra.get("emotion_arousal", 0.0),
                     "tilt_score": extra.get("emotion_tilt", 0.0),
                     "euphoria_score": extra.get("emotion_euphoria", 0.0),
                     "is_tilting": extra.get("is_tilting", False),
-                    "face_roi": getattr(session.streamer_emotion, "face_roi", {}) if getattr(session, "streamer_emotion", None) else {},
-                    "stream_frame_b64": extra.get("stream_frame_b64", ""),
-                    "source_channel": session.channel,
-                }
-            elif node_type == "GamblingOCRNode":
-                payload[node_id] = {
-                    "balance": extra.get("gambling_balance", 0.0),
-                    "bet": extra.get("gambling_bet", 0.0),
-                    "win": extra.get("gambling_win", 0.0),
-                    "multiplier": extra.get("gambling_multiplier", 0.0),
-                    "spin_state": extra.get("gambling_spin_state", "IDLE"),
-                    "rois": getattr(session.gambling_ocr, "rois", {}) if getattr(session, "gambling_ocr", None) else {},
-                    "stream_frame_b64": extra.get("stream_frame_b64", ""),
+                    "happy": get_met("happy"),
+                    "angry": get_met("angry"),
+                    "surprise": get_met("surprise"),
+                    "sad": get_met("sad"),
+                    "fear": get_met("fear"),
+                    "disgust": get_met("disgust"),
+                    "neutral": get_met("neutral"),
+                    "contempt": get_met("contempt"),
+                    "model": extra.get("emotion_model", getattr(session.streamer_emotion, "model_name", "ferplus")) if getattr(session, "streamer_emotion", None) else "ferplus",
+                    "latency_ms": extra.get("emotion_latency_ms", 0.0),
+                    "stream_frame_b64": face_b64,
+                    "face_thumbnail_b64": extra.get("emotion_thumbnail_b64", ""),
                     "source_channel": session.channel,
                 }
             elif node_type == "GamblingLedgerNode":
@@ -1002,11 +1151,13 @@ class GraphDAGManager:
                     "starting_balance": ledger_summary.get("starting_balance", 0.0),
                     "current_balance": ledger_summary.get("current_balance", 0.0),
                     "net_pnl": ledger_summary.get("net_pnl", 0.0),
+                    "winrate": ledger_summary.get("winrate_pct", 0.0),
                     "winrate_pct": ledger_summary.get("winrate_pct", 0.0),
                     "current_streak": ledger_summary.get("current_streak", 0),
                     "total_spins": ledger_summary.get("total_spins", 0),
                     "total_wagered": ledger_summary.get("total_wagered", 0.0),
                     "total_payout": ledger_summary.get("total_payout", 0.0),
+                    "rtp": ledger_summary.get("experienced_rtp", 100.0),
                     "experienced_rtp": ledger_summary.get("experienced_rtp", 100.0),
                     "is_chasing_losses": ledger_summary.get("is_chasing_losses", False),
                     "drawdown_dollars": ledger_summary.get("drawdown_dollars", 0.0),
@@ -1025,5 +1176,148 @@ class GraphDAGManager:
                     "debounce_remaining": debounce_remaining,
                     "source_channel": session.channel,
                 }
+
+        # Second Pass: Evaluate ThresholdGateNode instances using populated upstream payloads
+        for n in self.nodes.values():
+            if n.get("type") != "ThresholdGateNode":
+                continue
+            node_id = n["id"]
+            props = n.get("properties", {})
+            rules = props.get("rules", {})
+            logic_mode = str(props.get("logic_mode", "ALL")).upper()
+            min_count = int(props.get("min_count", 1))
+            debounce_sec = float(props.get("debounce_seconds", 10.0))
+            show_sliders = bool(props.get("show_sliders", True))
+
+            input_evaluations = {}
+            passed_count = 0
+            total_connected = 0
+
+            for inp in n.get("inputs", []):
+                port_id = inp["id"]
+                incoming_wire = next((w for w in self.wires if w.get("to") == f"{node_id}:{port_id}"), None)
+                current_val = None
+                passed = False
+                rule = rules.get(port_id, {
+                    "operator": ">=",
+                    "threshold": 0.5,
+                    "min": 0.0,
+                    "max": 1.0,
+                    "step": 0.01,
+                    "unit": "",
+                    "label": inp.get("name", port_id)
+                })
+                op = rule.get("operator", ">=")
+                thresh = float(rule.get("threshold", 0.5))
+
+                if incoming_wire:
+                    total_connected += 1
+                    up_id, up_port = incoming_wire["from"].split(":")
+                    up_payload = payload.get(up_id, {})
+
+                    if up_port in up_payload and isinstance(up_payload[up_port], (int, float)):
+                        current_val = float(up_payload[up_port])
+                    elif up_port == "delta_db" and "delta_db" in up_payload:
+                        current_val = float(up_payload["delta_db"])
+                    elif up_port in ("live_db", "current_db") and "current_db" in up_payload:
+                        current_val = float(up_payload["current_db"])
+                    elif up_port in ("velocity", "v_instant") and "v_instant" in up_payload:
+                        current_val = float(up_payload["v_instant"])
+                    elif up_port == "spike_ratio" and "spike_ratio" in up_payload:
+                        current_val = float(up_payload["spike_ratio"])
+                    elif up_port == "multiplier":
+                        try:
+                            current_val = float(str(up_payload.get("multiplier", "1.0")).replace("x", ""))
+                        except Exception:
+                            current_val = 1.0
+                    elif up_port == "balance":
+                        try:
+                            current_val = float(str(up_payload.get("balance", "0")).replace("$", "").replace(",", ""))
+                        except Exception:
+                            current_val = 0.0
+                    elif up_port in ("net_pnl", "winrate", "rtp"):
+                        current_val = float(up_payload.get(up_port, 0.0))
+                    elif up_port in ("valence", "arousal", "tilt_score", "euphoria_score", "happy", "angry", "surprise", "sad", "fear", "disgust", "neutral", "contempt", "confidence"):
+                        current_val = float(up_payload.get(up_port, 0.0))
+                    elif up_payload.get("emotions") and up_port in up_payload["emotions"]:
+                        current_val = float(up_payload["emotions"][up_port])
+                    else:
+                        try:
+                            raw_val = up_payload.get(up_port)
+                            if raw_val is not None:
+                                current_val = float(raw_val)
+                        except (ValueError, TypeError):
+                            current_val = None
+
+                    if current_val is not None:
+                        if op == ">" and current_val > thresh:
+                            passed = True
+                        elif op == ">=" and current_val >= thresh:
+                            passed = True
+                        elif op == "<" and current_val < thresh:
+                            passed = True
+                        elif op == "<=" and current_val <= thresh:
+                            passed = True
+                        elif op == "==" and abs(current_val - thresh) < 1e-4:
+                            passed = True
+                        elif op == "!=" and abs(current_val - thresh) >= 1e-4:
+                            passed = True
+
+                        if passed:
+                            passed_count += 1
+
+                input_evaluations[port_id] = {
+                    "value": current_val,
+                    "passed": passed,
+                    "connected": incoming_wire is not None,
+                    "label": rule.get("label", inp.get("name", port_id)),
+                    "threshold": thresh,
+                    "operator": op,
+                    "min": rule.get("min", 0.0),
+                    "max": rule.get("max", 1.0),
+                    "step": rule.get("step", 0.01),
+                    "unit": rule.get("unit", ""),
+                }
+
+            gate_fired = False
+            if total_connected > 0:
+                if logic_mode == "ALL":
+                    gate_fired = (passed_count == total_connected)
+                elif logic_mode == "ANY":
+                    gate_fired = (passed_count > 0)
+                elif logic_mode == "COUNT":
+                    gate_fired = (passed_count >= min_count)
+
+            now = time.time()
+            if not hasattr(self, "_threshold_gate_last_triggers"):
+                self._threshold_gate_last_triggers = {}
+            last_trig = self._threshold_gate_last_triggers.get(node_id, 0.0)
+            is_debouncing = (now - last_trig < debounce_sec) if last_trig > 0 else False
+            debounce_remaining = max(0.0, (last_trig + debounce_sec) - now) if is_debouncing else 0.0
+
+            is_trigger = False
+            if gate_fired and not is_debouncing:
+                self._threshold_gate_last_triggers[node_id] = now
+                is_trigger = True
+                is_debouncing = True
+                debounce_remaining = debounce_sec
+
+            session = self.get_node_source_session(node_id)
+
+            payload[node_id] = {
+                "logic_mode": logic_mode,
+                "min_count": min_count,
+                "debounce_seconds": debounce_sec,
+                "show_sliders": show_sliders,
+                "total_connected": total_connected,
+                "passed_count": passed_count,
+                "gate_fired": gate_fired,
+                "is_trigger": is_trigger,
+                "is_debouncing": is_debouncing,
+                "debounce_remaining": round(debounce_remaining, 1),
+                "inputs": input_evaluations,
+                "rules": rules,
+                "source_channel": session.channel if session else "unassigned",
+            }
 
         return payload

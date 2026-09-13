@@ -28,14 +28,51 @@ htmlcov/
 .DS_Store
 Thumbs.db
 
-# Storage / Temporary clips
-/storage/clips/clip_*.mp4
-/storage/clips/thumb_*.jpg
-/storage/clips/clip.mp4
-/storage/clips/test_*.ts
-storage/*.db-wal
-storage/*.db-shm
+# Video, Audio, and Stream Recordings (NEVER commit clip media to git)
+*.mp4
+*.ts
+*.m4s
+*.m3u8
+*.mov
+*.mkv
+*.webm
+*.avi
+*.flv
+*.aac
+*.wav
+*.mp3
+*.pcm
+*.m4a
+
+# Storage, SQLite DBs, Clips, and AI Settings
+storage/*
+!storage/.gitkeep
+!storage/clips/
+storage/clips/*
+storage/clips/**
+!storage/clips/.gitkeep
+!storage/clips/**/.gitkeep
+storage/cache/
+storage/segments/
+storage/thumbnails/
+storage/rendered/
+storage/temp/
+storage/*.json
+storage/**/*.jpg
+storage/**/*.jpeg
+storage/**/*.png
+storage/**/*.webp
+
+# SQLite DBs & temporary journals
+*.db
 *.db-wal
 *.db-shm
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# Data directories
+data/
 data/clips/
 data/segments/
+

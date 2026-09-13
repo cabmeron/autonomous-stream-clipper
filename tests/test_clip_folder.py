@@ -102,7 +102,7 @@ def test_db_folder_schema_and_queries(temp_db):
 
 def test_dag_default_template_has_clip_folder():
     """Verifies that default template connects HardwareRenderNode -> ClipFolderNode."""
-    dag = GraphDAGManager()
+    dag = GraphDAGManager(load_template=True)
     
     assert "node_folder" in dag.nodes
     folder_node = dag.nodes["node_folder"]
@@ -128,7 +128,7 @@ def test_multi_renderer_routing_to_single_folder():
 
     can both route their finished clips to a single shared ClipFolderNode.
     """
-    dag = GraphDAGManager()
+    dag = GraphDAGManager(load_template=True)
 
     # Add second hardware renderer (e.g. vertical shorts)
     dag.nodes["node_render_vert"] = {
@@ -155,7 +155,9 @@ def test_multi_renderer_routing_to_single_folder():
     assert valid is True, msg
 
     # Resolve downstream folder
-    downstream = dag.get_downstream_folder_for_session("marlon")
+    downstream = dag.get_downstream_folder_for_session("stream")
+    if not downstream:
+        downstream = dag.get_downstream_folder_for_session("marlon")
     assert downstream is not None
     assert downstream["folder_id"] == "node_folder"
     assert downstream["folder_name"] == "Highlight Reels"
@@ -169,7 +171,7 @@ def test_clip_folder_telemetry_payload(temp_db):
             self.sessions = {}
 
     orchestrator = DummyOrchestrator(temp_db)
-    dag = GraphDAGManager(orchestrator=orchestrator)
+    dag = GraphDAGManager(orchestrator=orchestrator, load_template=True)
 
     # Save a clip under node_folder
     temp_db.save_clip({
@@ -199,7 +201,7 @@ def test_clip_folder_telemetry_payload(temp_db):
 
 def test_update_node_param_folder_name():
     """Verifies that updating folder_name mutates node properties and title."""
-    dag = GraphDAGManager()
+    dag = GraphDAGManager(load_template=True)
     success = dag.update_node_param("node_folder", "folder_name", "Crazy Slots 2026")
     assert success is True
     assert dag.nodes["node_folder"]["properties"]["folder_name"] == "Crazy Slots 2026"

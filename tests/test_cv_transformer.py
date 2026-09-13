@@ -133,7 +133,7 @@ def test_gate_evaluator_cv_integration():
 
 
 def test_orchestrator_dag_cv_node():
-    dag = GraphDAGManager()
+    dag = GraphDAGManager(load_template=True)
     
     # Add a CVTransformerNode
     cv_node = {

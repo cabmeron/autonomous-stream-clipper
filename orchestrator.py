@@ -8,6 +8,7 @@ import signal
 import sys
 import threading
 import time
+import uuid
 from collections import deque
 from typing import Dict, List, Optional, Set
 from dotenv import load_dotenv
@@ -23,6 +24,7 @@ from services.heuristics.kick_slot_radar import KickSlotRadarService
 from services.heuristics.slot_presets import list_available_presets
 from services.heuristics.cv_transformer import CVTransformerService
 from services.heuristics.streamer_emotion import StreamerEmotionService
+from services.vision.image_scaler import ImageScalerService
 from services.heuristics.gambling_ocr import GamblingOCREngine
 from services.heuristics.gambling_ledger import GamblingLedger
 from services.heuristics.gate_evaluator import GateEvaluator
@@ -130,6 +132,10 @@ class StreamSession:
         # 4f. Dynamic Multi-Area OCR Extractor Service (arbitrary user-defined areas)
         self.dynamic_ocr = DynamicOCRExtractorService()
 
+        # 4g. Image Resolution & Scaler Service (Classical + Neural Super-Resolution)
+        self.image_scaler = ImageScalerService()
+        self.streamer_emotion_uses_scaler = False
+
         # 5. Gate Evaluator
         self.gate_evaluator = GateEvaluator(
             on_trigger_dispatch=self._on_clip_trigger,
@@ -181,6 +187,10 @@ class StreamSession:
             "emotion_tilt": 0.0,
             "emotion_euphoria": 0.0,
             "is_tilting": False,
+            "emotion_thumbnail_b64": "",
+            "emotion_latency_ms": 0.0,
+            "emotion_model": "ferplus",
+            "emotion_raw_logits": {},
             "gambling_balance": 0.0,
             "gambling_bet": 0.0,
             "gambling_win": 0.0,
@@ -415,7 +425,7 @@ async def cors_middleware(request, handler):
         response = await handler(request)
     response.headers["Access-Control-Allow-Origin"] = "*"
     response.headers["Access-Control-Allow-Methods"] = "GET, POST, DELETE, OPTIONS"
-    response.headers["Access-Control-Allow-Headers"] = "Content-Type"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept, X-Requested-With, X-Session-ID"
     return response
 
 
@@ -736,6 +746,25 @@ class StreamClipperOrchestrator:
             except Exception as e:
                 logger.debug("[FrameExtractor] Error extracting frame: %s", e)
 
+        # 1b. Image Resolution & Scaler Processing (Classical + Neural Super-Resolution)
+        scaler_frame = None
+        if getattr(session, "image_scaler", None) and frame is not None:
+            try:
+                target_input = frame
+                if getattr(session.image_scaler, "crop_roi", None):
+                    roi = session.image_scaler.crop_roi
+                    w, h = frame.size
+                    x1 = int(roi.get("x", 0.0) * w)
+                    y1 = int(roi.get("y", 0.0) * h)
+                    bw = int(roi.get("w", 1.0) * w)
+                    bh = int(roi.get("h", 1.0) * h)
+                    target_input = frame.crop((x1, y1, min(w, x1 + bw), min(h, y1 + bh)))
+                scaler_res = session.image_scaler.process_frame(target_input)
+                results["scaler_res"] = scaler_res
+                scaler_frame = scaler_res.get("frame")
+            except Exception as e:
+                logger.debug("[ImageScaler] Error processing frame: %s", e)
+
         # 2. Run Computer Vision Transformer (Zero-Shot & Object Detection)
         if ENABLE_CV and getattr(session, "cv_service", None):
             try:
@@ -747,7 +776,8 @@ class StreamClipperOrchestrator:
         # 3. Streamer Facial Emotion Recognition & Continuous Tilt Index
         if getattr(session, "streamer_emotion", None) and frame is not None:
             try:
-                emotion_res = session.streamer_emotion.process_frame(frame)
+                emotion_input = scaler_frame if (getattr(session, "streamer_emotion_uses_scaler", False) and scaler_frame is not None) else frame
+                emotion_res = session.streamer_emotion.process_frame(emotion_input)
                 results["emotion_res"] = emotion_res
             except Exception as e:
                 logger.debug("[StreamerEmotion] Error processing frame: %s", e)
@@ -870,6 +900,11 @@ class StreamClipperOrchestrator:
                                 session.extra_telemetry["emotion_tilt"] = emo["tilt_score"]
                                 session.extra_telemetry["emotion_euphoria"] = emo["euphoria_score"]
                                 session.extra_telemetry["is_tilting"] = emo["is_tilt_spike"]
+                                session.extra_telemetry["emotion_latency_ms"] = emo.get("latency_ms", 0.0)
+                                session.extra_telemetry["emotion_model"] = emo.get("model", getattr(session.streamer_emotion, "model_name", "ferplus"))
+                                session.extra_telemetry["emotion_raw_logits"] = emo.get("raw_logits", {})
+                                if emo.get("face_thumbnail_b64"):
+                                    session.extra_telemetry["emotion_thumbnail_b64"] = emo["face_thumbnail_b64"]
 
                             if heur_res.get("gambling_res"):
                                 g_res = heur_res["gambling_res"]
@@ -884,6 +919,15 @@ class StreamClipperOrchestrator:
 
                             if heur_res.get("slot_metrics") is not None:
                                 session.extra_telemetry["slot_metrics"] = heur_res["slot_metrics"]
+
+                            if heur_res.get("scaler_res"):
+                                s_res = heur_res["scaler_res"]
+                                session.extra_telemetry["scaler_input_res"] = s_res.get("input_res", "")
+                                session.extra_telemetry["scaler_output_res"] = s_res.get("output_res", "")
+                                session.extra_telemetry["scaler_latency_ms"] = s_res.get("latency_ms", 0.0)
+                                session.extra_telemetry["scaler_algorithm"] = s_res.get("algorithm", "")
+                                if s_res.get("scaled_thumbnail_b64"):
+                                    session.extra_telemetry["scaler_thumbnail_b64"] = s_res["scaled_thumbnail_b64"]
 
                     # 4. Chat State Description (every X seconds)
                     if session.chat_engine and session.chat_descriptor_service.enabled:
@@ -1380,7 +1424,9 @@ class StreamClipperOrchestrator:
 
                 clean = clean_channel_name(channel) if channel else None
                 if not clean:
-                    clean = list(self.sessions.keys())[0] if self.sessions else "marlon"
+                    clean = list(self.sessions.keys())[0] if self.sessions else ""
+                if not clean:
+                    return web.json_response({"error": "No active stream or target channel provided for watch party discovery"}, status=400)
 
                 res = await self.watch_party_finder.discover_and_evaluate(
                     target_channel=clean,
@@ -1400,7 +1446,9 @@ class StreamClipperOrchestrator:
         async def get_watchers_handler(request):
             channel = clean_channel_name(request.match_info.get("channel") or request.query.get("channel") or "")
             if not channel:
-                channel = list(self.sessions.keys())[0] if self.sessions else "marlon"
+                channel = list(self.sessions.keys())[0] if self.sessions else ""
+            if not channel:
+                return web.json_response({"error": "No active stream or target channel provided"}, status=400)
             cached = self.watch_party_finder.get_cached_results(channel)
             if not cached:
                 cached = await self.watch_party_finder.discover_and_evaluate(channel)

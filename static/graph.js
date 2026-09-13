@@ -19,7 +19,7 @@
       this.startPan = { x: 0, y: 0 };
 
       // Active Channel Binding
-      this.selectedChannel = (window.activeTab || "marlon").replace(/^#/, "").toLowerCase();
+      this.selectedChannel = (window.activeTab || "").replace(/^#/, "").toLowerCase();
       this.miniPlayers = new Map();
 
       // Graph Data
@@ -35,21 +35,184 @@
       this.activeWireDrag = null; // { fromNodeId, fromPortId, fromType, startX, startY, currentX, currentY }
       this.nodeRoiControllers = new Map();
 
-      // Preset Templates
+      // Preset Templates with Faceted Relational Taxonomy
       this.nodeCatalog = [
-        { type: "StreamSourceNode", category: "stream", title: "Stream Source (Twitch / Kick)", icon: "🔴", desc: "Live HLS, PCM Audio, & Chat" },
-        { type: "AudioMonitorNode", category: "audio", title: "Audio Decibel Monitor", icon: "🔊", desc: "RMS dB jump & volume spikes" },
-        { type: "ChatVelocityNode", category: "chat", title: "Chat Velocity Engine", icon: "💬", desc: "Messages/sec & spike ratio" },
-        { type: "OCRVisionNode", category: "ocr", title: "OCR / Vision Engine", icon: "🔍", desc: "Multiplier & slot balance detection" },
-        { type: "CVTransformerNode", category: "cv", title: "HuggingFace Vision", icon: "👁️", desc: "Zero-shot classification & detection" },
-        { type: "FacecamEmotionNode", category: "cv", title: "Facecam Emotion & Tilt", icon: "😡", desc: "Tilt Index, Valence, Arousal & Spikes" },
-        { type: "GamblingOCRNode", category: "ocr", title: "Gambling Multi-OCR", icon: "🎰", desc: "Balance, Bet, Win & Reel motion HUD" },
-        { type: "GamblingLedgerNode", category: "analytics", title: "Gambling PnL & Ledger", icon: "💰", desc: "Net PnL, Winrate, Streaks & Martingale alert" },
-        { type: "ScreenSummarizerNode", category: "summarizer", title: "AI Screen Summarizer", icon: "🤖", desc: "Multimodal frame vision + chat" },
-        { type: "GateEvaluatorNode", category: "gate", title: "Gate Evaluator & Logic", icon: "⚡", desc: "Weighted scoring & debounce" },
-        { type: "SegmentSlicerNode", category: "slicer", title: "Rolling Segment Slicer", icon: "✂️", desc: "60s zero-copy extraction" },
-        { type: "HardwareRenderNode", category: "render", title: "Hardware Video Renderer", icon: "🎬", desc: "Uncropped 1080p / 9:16 vertical" },
-        { type: "ClipFolderNode", category: "storage", title: "Clip Folder / Collection", icon: "📂", desc: "Multi-renderer folder repository & date organizer" },
+        {
+          type: "StreamSourceNode",
+          category: "stream",
+          stage: "source",
+          title: "Stream Source (Twitch / Kick)",
+          icon: "🔴",
+          desc: "Live HLS, PCM Audio, & Chat",
+          inputs_accepted: [],
+          outputs_produced: ["video", "audio", "chat"],
+          tags: ["stage:source", "out:video", "out:audio", "out:chat", "stream", "twitch", "kick", "ingest", "hls", "pcm", "chat", "irc"],
+        },
+        {
+          type: "VideoCropNode",
+          category: "transform",
+          stage: "transform",
+          title: "Video ROI Cropper",
+          icon: "✂️",
+          desc: "Targeted spatial crop (facecam, HUD, chat)",
+          inputs_accepted: ["video"],
+          outputs_produced: ["video"],
+          tags: ["stage:transform", "in:video", "out:video", "crop", "roi", "facecam", "bounding-box", "subset", "hud", "filter", "vision"],
+        },
+        {
+          type: "ImageScaleNode",
+          category: "transform",
+          stage: "transform",
+          title: "Resolution & Scaler",
+          icon: "🔬",
+          desc: "Lanczos4, Bicubic, AI Super-Resolution (ESPCN) & Detail Filters",
+          inputs_accepted: ["video"],
+          outputs_produced: ["video"],
+          tags: [
+            "stage:transform", "in:video", "out:video",
+            "scale", "resolution", "resample", "upscale", "downscale",
+            "lanczos", "bicubic", "nearest", "bilinear", "area",
+            "clahe", "sharpen", "denoise", "unsharp",
+            "super-resolution", "neural", "ai", "ocr-preprocessor",
+            "filter", "vision", "transform"
+          ],
+        },
+        {
+          type: "AudioMonitorNode",
+          category: "audio",
+          stage: "heuristic",
+          title: "Audio Decibel Monitor",
+          icon: "🔊",
+          desc: "RMS dB jump & volume spikes",
+          inputs_accepted: ["audio"],
+          outputs_produced: ["trigger", "scalar"],
+          tags: ["stage:heuristic", "in:audio", "out:trigger", "out:scalar", "audio", "decibels", "rms", "volume", "scream", "loud", "spike", "jump"],
+        },
+        {
+          type: "ChatVelocityNode",
+          category: "chat",
+          stage: "heuristic",
+          title: "Chat Velocity Engine",
+          icon: "💬",
+          desc: "Messages/sec & spike ratio",
+          inputs_accepted: ["chat"],
+          outputs_produced: ["trigger", "scalar"],
+          tags: ["stage:heuristic", "in:chat", "out:trigger", "out:scalar", "chat", "velocity", "messages-per-sec", "spam", "pog", "hype", "spike"],
+        },
+        {
+          type: "OCRVisionNode",
+          category: "ocr",
+          stage: "heuristic",
+          title: "OCR Classifier",
+          icon: "🔍",
+          desc: "Multiplier, balance & text recognition (route cropped video in)",
+          inputs_accepted: ["video"],
+          outputs_produced: ["trigger", "scalar"],
+          tags: ["stage:heuristic", "in:video", "out:trigger", "out:scalar", "ocr", "vision", "multiplier", "balance", "tesseract", "numbers", "text", "classifier"],
+        },
+        {
+          type: "CVTransformerNode",
+          category: "cv",
+          stage: "heuristic",
+          title: "HuggingFace Vision",
+          icon: "👁️",
+          desc: "Zero-shot classification & detection",
+          inputs_accepted: ["video"],
+          outputs_produced: ["trigger", "scalar", "text"],
+          tags: ["stage:heuristic", "in:video", "out:trigger", "out:scalar", "out:text", "vision", "ai", "clip", "vit", "zero-shot", "gameplay", "victory", "celebration"],
+        },
+        {
+          type: "FacecamEmotionNode",
+          category: "cv",
+          stage: "heuristic",
+          title: "Emotion Classifier",
+          icon: "🎭",
+          desc: "MobileFaceNet & FERPlus facial expressions, valence, arousal, & tilt/rage spikes (route facecam video in)",
+          inputs_accepted: ["video"],
+          outputs_produced: ["trigger", "scalar"],
+          tags: ["stage:heuristic", "in:video", "out:trigger", "out:scalar", "emotion", "classifier", "tilt", "rage", "euphoria", "valence", "arousal", "ai", "ferplus", "happy", "angry", "sad", "surprise"],
+        },
+        {
+          type: "GamblingLedgerNode",
+          category: "analytics",
+          stage: "analytics",
+          title: "Gambling PnL & Ledger",
+          icon: "💰",
+          desc: "Net PnL, Winrate, Streaks & Martingale alert",
+          inputs_accepted: ["scalar"],
+          outputs_produced: ["trigger", "scalar"],
+          tags: ["stage:analytics", "in:scalar", "out:trigger", "out:scalar", "pnl", "ledger", "winrate", "rtp", "streak", "martingale", "gambling", "stats"],
+        },
+        {
+          type: "ScreenSummarizerNode",
+          category: "summarizer",
+          stage: "heuristic",
+          title: "AI Screen Summarizer",
+          icon: "🤖",
+          desc: "Multimodal frame vision + chat",
+          inputs_accepted: ["video", "chat"],
+          outputs_produced: ["trigger", "text"],
+          tags: ["stage:heuristic", "in:video", "in:chat", "out:trigger", "out:text", "multimodal", "gemini", "summary", "ai", "vision", "context", "recap"],
+        },
+        {
+          type: "GateEvaluatorNode",
+          category: "gate",
+          stage: "gate",
+          title: "Gate Evaluator & Logic",
+          icon: "⚡",
+          desc: "Weighted scoring & debounce",
+          inputs_accepted: ["trigger"],
+          outputs_produced: ["trigger", "scalar"],
+          tags: ["stage:gate", "in:trigger", "out:trigger", "out:scalar", "gate", "logic", "combiner", "debounce", "weighted-score", "boolean", "cooldown"],
+        },
+        {
+          type: "ThresholdGateNode",
+          category: "gate",
+          stage: "gate",
+          title: "Threshold Logic Gate",
+          icon: "⚖️",
+          desc: "Multi-input scalar gate with customizable threshold rules, operators (> / >= / < / <= / ==), scenarios (ALL / ANY / COUNT), and toggled sliders",
+          inputs_accepted: ["scalar"],
+          outputs_produced: ["trigger", "scalar"],
+          tags: [
+            "stage:gate", "in:scalar", "out:trigger", "out:scalar",
+            "gate", "threshold", "logic", "value", "slider", "compare",
+            "above", "below", "all", "any", "count", "multi-input", "filter"
+          ],
+        },
+        {
+          type: "SegmentSlicerNode",
+          category: "slicer",
+          stage: "slicer",
+          title: "Rolling Segment Slicer",
+          icon: "✂️",
+          desc: "60s zero-copy extraction",
+          inputs_accepted: ["video", "trigger"],
+          outputs_produced: ["video"],
+          tags: ["stage:slicer", "in:video", "in:trigger", "out:video", "slicer", "ram-buffer", "zero-copy", "ts", "window", "slice", "extraction"],
+        },
+        {
+          type: "HardwareRenderNode",
+          category: "render",
+          stage: "render",
+          title: "Hardware Video Renderer",
+          icon: "🎬",
+          desc: "Uncropped 1080p / 9:16 vertical",
+          inputs_accepted: ["video"],
+          outputs_produced: ["clip"],
+          tags: ["stage:render", "in:video", "out:clip", "render", "hardware", "videotoolbox", "vertical", "9:16", "tiktok", "shorts", "subtitles", "karaoke"],
+        },
+        {
+          type: "ClipFolderNode",
+          category: "storage",
+          stage: "storage",
+          title: "Clip Folder / Collection",
+          icon: "📂",
+          desc: "Multi-renderer folder repository & date organizer",
+          inputs_accepted: ["clip"],
+          outputs_produced: [],
+          tags: ["stage:storage", "in:clip", "storage", "folder", "collection", "album", "save", "organize", "date", "export", "sink"],
+        },
       ];
 
       this.initEvents();
@@ -221,19 +384,85 @@
 
         const pathStr = this.computeBezierPath(s1.x, s1.y, s2.x, s2.y);
 
+        // Group container for hitbox, visual wire, and midpoint delete button
+        const groupEl = document.createElementNS("http://www.w3.org/2000/svg", "g");
+        groupEl.setAttribute("class", `graph-wire-group ${this.selectedWireId === wire.id ? "selected" : ""}`);
+        groupEl.setAttribute("data-wire-id", wire.id);
+
+        // 1. Invisible wide hitbox for easy clicking & hovering
+        const hitboxEl = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        hitboxEl.setAttribute("d", pathStr);
+        hitboxEl.setAttribute("class", "graph-wire-hitbox");
+
+        // 2. Visible wire path
         const pathEl = document.createElementNS("http://www.w3.org/2000/svg", "path");
         pathEl.setAttribute("d", pathStr);
         pathEl.setAttribute("id", `wire-${wire.id}`);
         pathEl.setAttribute("class", `graph-wire wire-active ${this.selectedWireId === wire.id ? "selected" : ""}`);
         pathEl.style.stroke = this.getPortColor(wire.type);
 
-        // Click to select wire
+        // 3. Floating midpoint delete button badge
+        // Symmetric horizontal cubic bezier midpoint P(0.5) is exactly ((s1.x + s2.x)/2, (s1.y + s2.y)/2)
+        const midX = (s1.x + s2.x) / 2;
+        const midY = (s1.y + s2.y) / 2;
+
+        const btnEl = document.createElementNS("http://www.w3.org/2000/svg", "g");
+        btnEl.setAttribute("class", "graph-wire-delete-btn");
+        btnEl.setAttribute("transform", `translate(${midX}, ${midY})`);
+        btnEl.setAttribute("data-wire-id", wire.id);
+
+        const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+        circle.setAttribute("r", "10");
+        circle.setAttribute("class", "wire-delete-circle");
+
+        const cross = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        cross.setAttribute("d", "M -3.5 -3.5 L 3.5 3.5 M 3.5 -3.5 L -3.5 3.5");
+        cross.setAttribute("class", "wire-delete-cross");
+
+        btnEl.appendChild(circle);
+        btnEl.appendChild(cross);
+
+        // Action handlers
+        const handleDeleteWire = (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          this.deleteWire(wire.id, true);
+        };
+
+        const handleContextMenu = (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          this.openWireContextMenu(wire.id, e.clientX, e.clientY);
+        };
+
+        btnEl.addEventListener("click", handleDeleteWire);
+
+        hitboxEl.addEventListener("click", (e) => {
+          e.stopPropagation();
+          if (e.altKey) {
+            handleDeleteWire(e);
+          } else {
+            this.selectWire(wire.id);
+          }
+        });
+        hitboxEl.addEventListener("dblclick", handleDeleteWire);
+        hitboxEl.addEventListener("contextmenu", handleContextMenu);
+
         pathEl.addEventListener("click", (e) => {
           e.stopPropagation();
-          this.selectWire(wire.id);
+          if (e.altKey) {
+            handleDeleteWire(e);
+          } else {
+            this.selectWire(wire.id);
+          }
         });
+        pathEl.addEventListener("dblclick", handleDeleteWire);
+        pathEl.addEventListener("contextmenu", handleContextMenu);
 
-        this.svgLayer.appendChild(pathEl);
+        groupEl.appendChild(hitboxEl);
+        groupEl.appendChild(pathEl);
+        groupEl.appendChild(btnEl);
+        this.svgLayer.appendChild(groupEl);
       });
 
       // Render temporary dragging wire
@@ -312,6 +541,20 @@
             this.activeWireDrag.fromType
           );
         }
+      } else if (!hoveredPin && this.activeWireDrag) {
+        // Wire dropped onto empty canvas - open context-sensitive spawn palette
+        const startScreen = this.worldToScreen(this.activeWireDrag.startX, this.activeWireDrag.startY);
+        const dragDist = Math.hypot(e.clientX - startScreen.x, e.clientY - startScreen.y);
+        if (dragDist > 25) {
+          const wireInfo = {
+            fromNodeId: this.activeWireDrag.fromNodeId,
+            fromPortId: this.activeWireDrag.fromPortId,
+            fromType: this.activeWireDrag.fromType,
+          };
+          setTimeout(() => {
+            this.openSpawnPalette(e.clientX, e.clientY, `in:${wireInfo.fromType}`, wireInfo);
+          }, 10);
+        }
       }
 
       document.querySelectorAll(".port-pin.hovered").forEach((p) => p.classList.remove("hovered"));
@@ -330,6 +573,39 @@
         type: type,
       };
       this.wires.push(newWire);
+
+      // Check if destination is ThresholdGateNode
+      const [fromNodeId, fromPortId] = fromStr.split(":");
+      const [toNodeId, toPortId] = toStr.split(":");
+      const dstNode = this.nodes.get(toNodeId);
+      const srcNode = this.nodes.get(fromNodeId);
+
+      if (dstNode && dstNode.type === "ThresholdGateNode" && srcNode) {
+        const srcPort = (srcNode.outputs || []).find((p) => p.id === fromPortId);
+        if (srcPort) {
+          if (!dstNode.properties) dstNode.properties = {};
+          if (!dstNode.properties.rules) dstNode.properties.rules = {};
+          const rule = dstNode.properties.rules[toPortId] || { operator: ">=" };
+          rule.label = srcPort.name || toPortId;
+          if (srcPort.min !== undefined) rule.min = srcPort.min;
+          if (srcPort.max !== undefined) rule.max = srcPort.max;
+          if (srcPort.step !== undefined) rule.step = srcPort.step;
+          if (srcPort.unit !== undefined) rule.unit = srcPort.unit;
+
+          const minV = rule.min !== undefined ? rule.min : 0.0;
+          const maxV = rule.max !== undefined ? rule.max : 1.0;
+          if (rule.threshold === undefined || rule.threshold < minV || rule.threshold > maxV) {
+            rule.threshold = Number(((minV + maxV) / 2.0).toFixed(2));
+          }
+          dstNode.properties.rules[toPortId] = rule;
+
+          // Re-render the node DOM to reflect new slider bounds, units, and label
+          const oldEl = document.getElementById(`node-${toNodeId}`);
+          if (oldEl) oldEl.remove();
+          this.renderNodeDOM(dstNode);
+        }
+      }
+
       this.renderWires();
       this.syncGraphDebounced();
       if (this.latestTelemetry) {
@@ -337,19 +613,160 @@
       }
     }
 
-    deleteWire(wireId) {
-      this.wires = this.wires.filter((w) => w.id !== wireId);
+    _isRootSourceNode(nodeId) {
+      const node = this.nodes.get(nodeId);
+      if (!node) return true;
+      if (node.type === "StreamSourceNode") return true;
+      const inputs = node.inputs || [];
+      return inputs.length === 0;
+    }
+
+    _cascadePruneCutoffNodes(candidateNodeIds, deletedWireIds = new Set(), cutoffNodeIds = new Set()) {
+      const queue = [...candidateNodeIds].filter((nid) => nid && !this._isRootSourceNode(nid));
+
+      while (queue.length > 0) {
+        const nodeId = queue.shift();
+        if (cutoffNodeIds.has(nodeId)) continue;
+
+        // Check if this node has ANY remaining incoming wires (excluding wires already marked deleted)
+        const incomingWires = this.wires.filter(
+          (w) => !deletedWireIds.has(w.id) && w.to.split(":")[0] === nodeId
+        );
+
+        if (incomingWires.length === 0) {
+          // Node is completely cutoff!
+          cutoffNodeIds.add(nodeId);
+
+          // Find all outgoing wires from this newly cutoff node
+          const outgoingWires = this.wires.filter(
+            (w) => !deletedWireIds.has(w.id) && w.from.split(":")[0] === nodeId
+          );
+
+          for (const outWire of outgoingWires) {
+            deletedWireIds.add(outWire.id);
+            const nextDstNodeId = outWire.to.split(":")[0];
+            if (nextDstNodeId && !cutoffNodeIds.has(nextDstNodeId) && !this._isRootSourceNode(nextDstNodeId)) {
+              queue.push(nextDstNodeId);
+            }
+          }
+        }
+      }
+
+      return { deletedWireIds, cutoffNodeIds };
+    }
+
+    deleteWire(wireId, cascade = true) {
+      const wire = this.wires.find((w) => w.id === wireId);
+      if (!wire) return;
+
+      const deletedWireIds = new Set([wireId]);
+      const targetNodeId = wire.to.split(":")[0];
+      let prunedDownstreamCount = 0;
+      let cutoffNodeNames = [];
+
+      if (cascade && targetNodeId) {
+        const { deletedWireIds: allDeleted, cutoffNodeIds } = this._cascadePruneCutoffNodes(
+          [targetNodeId],
+          deletedWireIds
+        );
+        prunedDownstreamCount = allDeleted.size - 1;
+
+        cutoffNodeIds.forEach((cId) => {
+          const cNode = this.nodes.get(cId);
+          if (cNode) {
+            this.renderUnroutedNodeState(cNode);
+            cutoffNodeNames.push(cNode.title || cNode.type || cId);
+          }
+        });
+      }
+
+      this.wires = this.wires.filter((w) => !deletedWireIds.has(w.id));
       this.selectedWireId = null;
+      this.closeWireContextMenu();
       this.renderWires();
       this.syncGraphDebounced();
       if (this.latestTelemetry) {
         this.applyTelemetry(this.latestTelemetry);
       }
+
+      if (prunedDownstreamCount > 0) {
+        const summary = cutoffNodeNames.length <= 2
+          ? cutoffNodeNames.join(", ")
+          : `${cutoffNodeNames.slice(0, 2).join(", ")} +${cutoffNodeNames.length - 2} more`;
+        this.showToast(`✂️ Severed connection & pruned ${prunedDownstreamCount} cutoff downstream wire(s) (${summary}).`);
+      } else {
+        this.showToast("✂️ Connection removed.");
+      }
+    }
+
+    openWireContextMenu(wireId, clientX, clientY) {
+      this.closeWireContextMenu();
+      const menu = document.createElement("div");
+      menu.setAttribute("id", "wire-context-menu");
+      menu.setAttribute("class", "wire-context-menu");
+
+      const menuWidth = 260;
+      const menuHeight = 140;
+      const posX = Math.min(clientX, window.innerWidth - menuWidth - 16);
+      const posY = Math.min(clientY, window.innerHeight - menuHeight - 16);
+      menu.style.left = `${Math.max(12, posX)}px`;
+      menu.style.top = `${Math.max(12, posY)}px`;
+
+      menu.innerHTML = `
+        <div class="wire-menu-header">Connection Options</div>
+        <div class="wire-menu-item delete-cascade" data-action="delete-cascade">
+          <span class="icon">✂️</span>
+          <span class="label">Delete Connection & Prune Cutoff</span>
+          <span class="badge">Default</span>
+        </div>
+        <div class="wire-menu-item delete-single" data-action="delete-single">
+          <span class="icon">🔗</span>
+          <span class="label">Delete Connection Only</span>
+        </div>
+        <div class="wire-menu-divider"></div>
+        <div class="wire-menu-item cancel" data-action="cancel">
+          <span class="icon">✖️</span>
+          <span class="label">Cancel</span>
+        </div>
+      `;
+
+      menu.querySelector(".delete-cascade").addEventListener("click", (e) => {
+        e.stopPropagation();
+        this.closeWireContextMenu();
+        this.deleteWire(wireId, true);
+      });
+
+      menu.querySelector(".delete-single").addEventListener("click", (e) => {
+        e.stopPropagation();
+        this.closeWireContextMenu();
+        this.deleteWire(wireId, false);
+      });
+
+      menu.querySelector(".cancel").addEventListener("click", (e) => {
+        e.stopPropagation();
+        this.closeWireContextMenu();
+      });
+
+      document.body.appendChild(menu);
+
+      const dismissHandler = (e) => {
+        if (!menu.contains(e.target)) {
+          this.closeWireContextMenu();
+          window.removeEventListener("pointerdown", dismissHandler);
+        }
+      };
+      setTimeout(() => window.addEventListener("pointerdown", dismissHandler), 10);
+    }
+
+    closeWireContextMenu() {
+      const existing = document.getElementById("wire-context-menu");
+      if (existing) existing.remove();
     }
 
     selectWire(wireId) {
       this.selectedWireId = wireId;
       this.selectedNodeId = null;
+      this.closeWireContextMenu();
       document.querySelectorAll(".studio-node").forEach((n) => n.classList.remove("selected"));
       this.renderWires();
     }
@@ -357,6 +774,7 @@
     deselectAll() {
       this.selectedNodeId = null;
       this.selectedWireId = null;
+      this.closeWireContextMenu();
       document.querySelectorAll(".studio-node").forEach((n) => n.classList.remove("selected"));
       this.renderWires();
     }
@@ -420,8 +838,31 @@
           <div class="port-pin input port-${inp.type}" data-node="${node.id}" data-port="${inp.id}" data-type="${inp.type}"></div>
           <span>${inp.name}</span>
         `;
+        if (node.type === "ThresholdGateNode" && (node.inputs || []).length > 1) {
+          const rmBtn = document.createElement("button");
+          rmBtn.setAttribute("class", "gate-remove-pin-btn");
+          rmBtn.setAttribute("title", `Remove pin ${inp.name}`);
+          rmBtn.innerHTML = "&times;";
+          rmBtn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            this.removeGateInput(node.id, inp.id);
+          });
+          wrap.appendChild(rmBtn);
+        }
         inCol.appendChild(wrap);
       });
+
+      if (node.type === "ThresholdGateNode") {
+        const addPinBtn = document.createElement("button");
+        addPinBtn.setAttribute("class", "gate-add-pin-btn");
+        addPinBtn.setAttribute("title", "Add dynamic scalar input pin");
+        addPinBtn.innerHTML = "<span>+</span> Add Input";
+        addPinBtn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          this.addGateInput(node.id);
+        });
+        inCol.appendChild(addPinBtn);
+      }
 
       // Output ports column
       const outCol = document.createElement("div");
@@ -459,18 +900,130 @@
       }
     }
 
-    deleteNode(nodeId) {
-      // Remove all connected wires
-      this.wires = this.wires.filter(
-        (w) => !w.from.startsWith(`${nodeId}:`) && !w.to.startsWith(`${nodeId}:`)
-      );
+    deleteNode(nodeId, cascade = true) {
+      const node = this.nodes.get(nodeId);
+      if (!node) return;
+
+      // Identify downstream candidate nodes before removing outgoing wires
+      const downstreamCandidates = [];
+      this.wires.forEach((w) => {
+        if (w.from.split(":")[0] === nodeId) {
+          downstreamCandidates.push(w.to.split(":")[0]);
+        }
+      });
+
+      // Remove directly connected input & output wires
+      const directWireIds = new Set();
+      this.wires.forEach((w) => {
+        if (w.from.split(":")[0] === nodeId || w.to.split(":")[0] === nodeId) {
+          directWireIds.add(w.id);
+        }
+      });
+
+      this.wires = this.wires.filter((w) => !directWireIds.has(w.id));
       this.nodes.delete(nodeId);
 
       const el = document.getElementById(`node-${nodeId}`);
       if (el) el.remove();
 
+      let prunedCount = 0;
+      if (cascade && downstreamCandidates.length > 0) {
+        const { deletedWireIds, cutoffNodeIds } = this._cascadePruneCutoffNodes(
+          downstreamCandidates,
+          new Set(),
+          new Set([nodeId])
+        );
+
+        if (deletedWireIds.size > 0) {
+          this.wires = this.wires.filter((w) => !deletedWireIds.has(w.id));
+          prunedCount = deletedWireIds.size;
+        }
+
+        cutoffNodeIds.forEach((cId) => {
+          const cNode = this.nodes.get(cId);
+          if (cNode) this.renderUnroutedNodeState(cNode);
+        });
+      }
+
+      this.selectedNodeId = null;
+      this.selectedWireId = null;
+      this.closeWireContextMenu();
       this.renderWires();
       this.syncGraphDebounced();
+      this.updateEmptyState();
+
+      if (prunedCount > 0) {
+        this.showToast(`🗑️ Removed node & pruned ${prunedCount} downstream cutoff wire(s).`);
+      }
+    }
+
+    addGateInput(nodeId, customLabel = null) {
+      const node = this.nodes.get(nodeId);
+      if (!node || node.type !== "ThresholdGateNode") return;
+
+      if (!node.inputs) node.inputs = [];
+      const existingIds = new Set(node.inputs.map((inp) => inp.id));
+      let idx = node.inputs.length + 1;
+      while (existingIds.has(`val_${idx}`)) {
+        idx++;
+      }
+      const newId = `val_${idx}`;
+      const newName = customLabel || `Value In ${idx}`;
+
+      node.inputs.push({ id: newId, name: newName, type: "scalar" });
+
+      if (!node.properties) node.properties = {};
+      if (!node.properties.rules) node.properties.rules = {};
+      node.properties.rules[newId] = {
+        operator: ">=",
+        threshold: 0.5,
+        min: 0.0,
+        max: 1.0,
+        step: 0.01,
+        unit: "",
+        label: newName,
+      };
+
+      const oldEl = document.getElementById(`node-${nodeId}`);
+      if (oldEl) oldEl.remove();
+      this.renderNodeDOM(node);
+      this.renderWires();
+      this.syncGraphDebounced();
+      if (this.latestTelemetry) {
+        this.applyTelemetry(this.latestTelemetry);
+      }
+      this.showToast(`➕ Added input '${newName}' to Threshold Logic Gate.`);
+    }
+
+    removeGateInput(nodeId, portId) {
+      const node = this.nodes.get(nodeId);
+      if (!node || node.type !== "ThresholdGateNode") return;
+
+      if ((node.inputs || []).length <= 1) {
+        this.showToast("⚠️ Cannot remove the last remaining input on a Threshold Gate.");
+        return;
+      }
+
+      node.inputs = (node.inputs || []).filter((inp) => inp.id !== portId);
+      if (node.properties?.rules && node.properties.rules[portId]) {
+        delete node.properties.rules[portId];
+      }
+
+      const targetWireStr = `${nodeId}:${portId}`;
+      const deletedWire = this.wires.find((w) => w.to === targetWireStr);
+      if (deletedWire) {
+        this.deleteWire(deletedWire.id, false);
+      }
+
+      const oldEl = document.getElementById(`node-${nodeId}`);
+      if (oldEl) oldEl.remove();
+      this.renderNodeDOM(node);
+      this.renderWires();
+      this.syncGraphDebounced();
+      if (this.latestTelemetry) {
+        this.applyTelemetry(this.latestTelemetry);
+      }
+      this.showToast(`🗑️ Removed input pin '${portId}' from Threshold Gate.`);
     }
 
     getNodeIcon(type) {
@@ -489,7 +1042,7 @@
       const videoEl = document.getElementById(`mini-player-${nodeId}`);
       if (!videoEl) return;
 
-      const cleanCh = (channel || "marlon").replace(/^#/, "").toLowerCase();
+      const cleanCh = (channel || this.selectedChannel || window.activeTab || "").replace(/^#/, "").toLowerCase();
       if (!cleanCh) return;
 
       const streamUrl = `/api/sessions/${cleanCh}/live.m3u8`;
@@ -523,7 +1076,8 @@
         Object.keys(this.latestTelemetry.sessions).forEach((c) => channels.add(c.toLowerCase()));
       }
       if (channels.size === 0) {
-        channels.add("marlon");
+        selectEl.innerHTML = `<option value="" disabled selected>No Active Streams</option>`;
+        return;
       }
 
       const expectedKeys = Array.from(channels).join(",");
@@ -627,6 +1181,96 @@
       return null;
     }
 
+    getNodeUpstreamCropRoi(node, visited = new Set()) {
+      if (!node || visited.has(node.id)) return null;
+      visited.add(node.id);
+      for (const wire of this.wires) {
+        const [dstId, dstPort] = wire.to.split(":");
+        if (dstId === node.id && (dstPort === "video_in" || dstPort === "video" || !dstPort)) {
+          const [srcId, srcPort] = wire.from.split(":");
+          const srcNode = this.nodes.get(srcId);
+          if (srcNode) {
+            if (srcNode.type === "VideoCropNode") {
+              const roi = srcNode.properties?.roi || {
+                x: srcNode.properties?.x ?? 0.02,
+                y: srcNode.properties?.y ?? 0.05,
+                w: srcNode.properties?.w ?? 0.22,
+                h: srcNode.properties?.h ?? 0.28,
+              };
+              return { roi, cropNode: srcNode };
+            }
+            if (srcNode.type === "ImageScaleNode") {
+              const upstream = this.getNodeUpstreamCropRoi(srcNode, visited);
+              if (upstream) return upstream;
+            }
+          }
+        }
+      }
+      return null;
+    }
+
+    updateDownstreamCroppedPreviews(cropNodeId, roi) {
+      if (!cropNodeId || !roi) return;
+      for (const wire of this.wires) {
+        const [srcId] = wire.from.split(":");
+        if (srcId === cropNodeId) {
+          const [dstId] = wire.to.split(":");
+          const dstNode = this.nodes.get(dstId);
+          if (!dstNode) continue;
+          if (dstNode.type === "ImageScaleNode") {
+            const scaleImg = document.getElementById(`scale-live-img-${dstId}`);
+            if (scaleImg && scaleImg.style.display !== "none") {
+              const leftPct = -(roi.x / roi.w) * 100;
+              const topPct = -(roi.y / roi.h) * 100;
+              const widthPct = (1 / roi.w) * 100;
+              const heightPct = (1 / roi.h) * 100;
+              scaleImg.style.position = "absolute";
+              scaleImg.style.width = `${widthPct}%`;
+              scaleImg.style.height = `${heightPct}%`;
+              scaleImg.style.left = `${leftPct}%`;
+              scaleImg.style.top = `${topPct}%`;
+              scaleImg.style.maxWidth = "none";
+              scaleImg.style.maxHeight = "none";
+              scaleImg.style.objectFit = "fill";
+            }
+            this.updateDownstreamCroppedPreviews(dstId, roi);
+          } else if (dstNode.type === "FacecamEmotionNode") {
+            const faceImg = document.getElementById(`face-live-img-${dstId}`);
+            if (faceImg && faceImg.style.display !== "none") {
+              const leftPct = -(roi.x / roi.w) * 100;
+              const topPct = -(roi.y / roi.h) * 100;
+              const widthPct = (1 / roi.w) * 100;
+              const heightPct = (1 / roi.h) * 100;
+              faceImg.style.position = "absolute";
+              faceImg.style.width = `${widthPct}%`;
+              faceImg.style.height = `${heightPct}%`;
+              faceImg.style.left = `${leftPct}%`;
+              faceImg.style.top = `${topPct}%`;
+              faceImg.style.maxWidth = "none";
+              faceImg.style.maxHeight = "none";
+              faceImg.style.objectFit = "fill";
+            }
+          } else if (dstNode.type === "OCRVisionNode") {
+            const ocrImg = document.getElementById(`ocr-live-img-${dstId}`);
+            if (ocrImg && ocrImg.style.display !== "none") {
+              const leftPct = -(roi.x / roi.w) * 100;
+              const topPct = -(roi.y / roi.h) * 100;
+              const widthPct = (1 / roi.w) * 100;
+              const heightPct = (1 / roi.h) * 100;
+              ocrImg.style.position = "absolute";
+              ocrImg.style.width = `${widthPct}%`;
+              ocrImg.style.height = `${heightPct}%`;
+              ocrImg.style.left = `${leftPct}%`;
+              ocrImg.style.top = `${topPct}%`;
+              ocrImg.style.maxWidth = "none";
+              ocrImg.style.maxHeight = "none";
+              ocrImg.style.objectFit = "fill";
+            }
+          }
+        }
+      }
+    }
+
     renderUnroutedNodeState(node) {
       if (!node || node.type === "StreamSourceNode" || node.type === "ClipFolderNode") return;
       const nodeId = node.id;
@@ -682,9 +1326,38 @@
         if (listEl) {
           listEl.innerHTML = '<div style="color:#475569; font-size:10px; text-align:center; padding:6px 0;">No stream data</div>';
         }
+      } else if (node.type === "VideoCropNode") {
+        const cropImg = document.getElementById(`crop-live-img-${nodeId}`);
+        const cropPlaceholder = document.getElementById(`crop-placeholder-${nodeId}`);
+        if (cropImg) {
+          cropImg.style.display = "none";
+          cropImg.removeAttribute("src");
+        }
+        if (cropPlaceholder) {
+          cropPlaceholder.style.display = "block";
+          cropPlaceholder.textContent = "Unrouted (Connect Video In or Assign Stream)";
+        }
+      } else if (node.type === "ImageScaleNode") {
+        const scaleImg = document.getElementById(`scale-live-img-${nodeId}`);
+        const scalePlaceholder = document.getElementById(`scale-placeholder-${nodeId}`);
+        const scaleBadge = document.getElementById(`scale-dim-badge-${nodeId}`);
+        const latencyTag = document.getElementById(`scale-latency-tag-${nodeId}`);
+        const cropBadge = document.getElementById(`scale-crop-badge-${nodeId}`);
+        if (scaleImg) {
+          scaleImg.style.display = "none";
+          scaleImg.removeAttribute("src");
+        }
+        if (scalePlaceholder) {
+          scalePlaceholder.style.display = "block";
+          scalePlaceholder.textContent = "Unrouted (Connect Video In or Crop Node)";
+        }
+        if (cropBadge) cropBadge.style.display = "none";
+        if (scaleBadge) scaleBadge.textContent = "--x-- ➔ --x-- (2.0x)";
+        if (latencyTag) latencyTag.textContent = "-- ms";
       } else if (node.type === "FacecamEmotionNode") {
         const faceImg = document.getElementById(`face-live-img-${nodeId}`);
         const facePlaceholder = document.getElementById(`face-placeholder-${nodeId}`);
+        const cropBadge = document.getElementById(`face-crop-badge-${nodeId}`);
         const tiltNum = document.getElementById(`face-tilt-num-${nodeId}`);
         const tiltPill = document.getElementById(`face-tilt-pill-${nodeId}`);
         const topVal = document.getElementById(`face-top-val-${nodeId}`);
@@ -693,6 +1366,9 @@
         const barsBox = document.getElementById(`face-bars-${nodeId}`);
         const latencyTag = document.getElementById(`face-latency-tag-${nodeId}`);
 
+        if (cropBadge) {
+          cropBadge.style.display = "none";
+        }
         if (faceImg) {
           faceImg.style.display = "none";
           faceImg.removeAttribute("src");
@@ -747,31 +1423,6 @@
         if (ticker) {
           ticker.innerHTML = '<div style="color:#475569; font-size:10px; text-align:center; padding:12px 0;">Connect Chat In to stream</div>';
         }
-      } else if (node.type === "GamblingOCRNode") {
-        const gImg = document.getElementById(`g-live-img-${nodeId}`);
-        const gPlaceholder = document.getElementById(`g-placeholder-${nodeId}`);
-        const spinBadge = document.getElementById(`g-spin-state-${nodeId}`);
-        const balVal = document.getElementById(`g-bal-val-${nodeId}`);
-        const betVal = document.getElementById(`g-bet-val-${nodeId}`);
-        const winVal = document.getElementById(`g-win-val-${nodeId}`);
-        const multVal = document.getElementById(`g-mult-val-${nodeId}`);
-
-        if (gImg) {
-          gImg.style.display = "none";
-          gImg.removeAttribute("src");
-        }
-        if (gPlaceholder) {
-          gPlaceholder.style.display = "block";
-          gPlaceholder.textContent = "Unrouted (Connect Video In or Assign Stream)";
-        }
-        if (spinBadge) {
-          spinBadge.textContent = "UNROUTED";
-          spinBadge.style.color = "#64748b";
-        }
-        if (balVal) balVal.textContent = "$--";
-        if (betVal) betVal.textContent = "$--";
-        if (winVal) winVal.textContent = "$--";
-        if (multVal) multVal.textContent = "--x";
       } else if (node.type === "GamblingLedgerNode") {
         const pnlEl = document.getElementById(`ledger-pnl-${nodeId}`);
         const chaseBadge = document.getElementById(`ledger-chase-badge-${nodeId}`);
@@ -978,13 +1629,13 @@
       const props = node.properties || {};
 
       if (node.type === "StreamSourceNode") {
-        const currentChannel = (node.properties?.channel || this.selectedChannel || window.activeTab || "marlon").replace(/^#/, "").toLowerCase();
+        const currentChannel = (node.properties?.channel || this.selectedChannel || window.activeTab || "").replace(/^#/, "").toLowerCase();
         const currentPlatform = (node.properties?.platform || (currentChannel.includes("kick") ? "kick" : "twitch")).toLowerCase();
         node.properties = node.properties || {};
         node.properties.channel = currentChannel;
         node.properties.platform = currentPlatform;
         const platLabel = currentPlatform === "kick" ? "Kick" : "Twitch";
-        node.title = `${platLabel} Source: #${currentChannel}`;
+        node.title = currentChannel ? `${platLabel} Source: #${currentChannel}` : `${platLabel} Source`;
 
         const widget = document.createElement("div");
         widget.setAttribute("class", "node-widget");
@@ -1125,21 +1776,12 @@
             </select>
           </div>
           <div class="widget-label">
-            <span>Interactive ROI Crop Box</span>
+            <span>OCR Stream Classifier</span>
             <span class="widget-val" id="ocr-val-${node.id}">— (Unrouted)</span>
-          </div>
-          <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px; margin-top:2px;">
-            <span style="font-size:9px; color:#94a3b8; font-weight:700;">PRESET:</span>
-            <div style="display:flex; gap:3px;">
-              <button class="slot-preset-btn-mini" data-preset="pragmatic_play" style="font-size:9px; padding:2px 5px; border-radius:4px; border:1px solid rgba(255,255,255,0.1); background:rgba(255,255,255,0.05); color:#cbd5e1; cursor:pointer;">Pragmatic</button>
-              <button class="slot-preset-btn-mini" data-preset="hacksaw_gaming" style="font-size:9px; padding:2px 5px; border-radius:4px; border:1px solid rgba(255,255,255,0.1); background:rgba(255,255,255,0.05); color:#cbd5e1; cursor:pointer;">Hacksaw</button>
-              <button class="slot-preset-btn-mini" data-preset="nolimit_city" style="font-size:9px; padding:2px 5px; border-radius:4px; border:1px solid rgba(255,255,255,0.1); background:rgba(255,255,255,0.05); color:#cbd5e1; cursor:pointer;">Nolimit</button>
-              <button class="slot-preset-btn-mini" data-preset="default_slots" style="font-size:9px; padding:2px 5px; border-radius:4px; border:1px solid rgba(255,255,255,0.1); background:rgba(255,255,255,0.05); color:#cbd5e1; cursor:pointer;">Stake</button>
-            </div>
           </div>
           <div class="node-roi-container roi-container-${node.id}">
             <img class="roi-live-img" id="ocr-live-img-${node.id}" style="display:none;" />
-            <div class="roi-placeholder-text" id="ocr-placeholder-${node.id}">Unrouted (Connect Video In or Assign Stream)</div>
+            <div class="roi-placeholder-text" id="ocr-placeholder-${node.id}">Unrouted (Connect Video In or Crop Node)</div>
           </div>
           <div style="display:flex; justify-content:space-between; font-size:9px; color:#94a3b8; margin-top:4px;">
             <span>Win Threshold: ≥ ${props.multiplier_threshold || 100}x</span>
@@ -1155,49 +1797,20 @@
           this.syncNodeParamDebounced(node.id, "multiplier_threshold", props.multiplier_threshold);
         });
 
-        widget.querySelectorAll(".slot-preset-btn-mini").forEach(btn => {
-          btn.addEventListener("click", (e) => {
-            const preset = btn.getAttribute("data-preset");
-            props.slot_preset = preset;
-            this.syncNodeParamDebounced(node.id, "slot_preset", preset);
-            if (window.applySlotPreset) {
-              window.applySlotPreset(preset);
-            }
-            widget.querySelectorAll(".slot-preset-btn-mini").forEach(b => {
-              b.style.background = "rgba(255,255,255,0.05)";
-              b.style.color = "#cbd5e1";
-              b.style.borderColor = "rgba(255,255,255,0.1)";
-            });
-            btn.style.background = "#53fc18";
-            btn.style.color = "#000";
-            btn.style.borderColor = "#53fc18";
-            this.showToast(`Applied ${preset} layout`);
-          });
-        });
-
         this.setupSourceSelect(widget, node);
         bodyEl.appendChild(widget);
-
-        // Mount interactive draggable ROI box
-        setTimeout(() => {
-          const container = widget.querySelector(`.roi-container-${node.id}`);
-          if (container) {
-            const initialRoi = props.roi || { x: 0.70, y: 0.85, w: 0.28, h: 0.12 };
-            props.roi = initialRoi;
-            const ctrl = this.setupDraggableRoiBox(container, initialRoi, "#10b981", "OCR ROI", (roi, isFinal) => {
-              props.roi = roi;
-              if (isFinal) {
-                this.syncNodeParamDebounced(node.id, "roi", roi);
-                this.showToast("OCR ROI calibrated");
-              }
-            });
-            this.nodeRoiControllers.set(`${node.id}:ocr`, ctrl);
-          }
-        }, 50);
-      } else if (node.type === "FacecamEmotionNode") {
+      } else if (node.type === "VideoCropNode") {
         const widget = document.createElement("div");
-        widget.setAttribute("class", "node-widget");
-        const tiltThresh = props.tilt_threshold !== undefined ? props.tilt_threshold : 65.0;
+        widget.setAttribute("class", "node-widget cropper-widget");
+        const currentPreset = props.preset || "facecam_tl";
+        const initialRoi = props.roi || {
+          x: props.x ?? 0.02,
+          y: props.y ?? 0.05,
+          w: props.w ?? 0.22,
+          h: props.h ?? 0.28,
+        };
+        props.roi = initialRoi;
+
         widget.innerHTML = `
           <div class="node-source-row" style="margin-bottom:6px; display:flex; align-items:center; justify-content:space-between; gap:6px; background:rgba(0,0,0,0.25); padding:3px 6px; border-radius:4px;">
             <span style="font-size:10px; color:#94a3b8; white-space:nowrap;">Stream Source:</span>
@@ -1205,13 +1818,229 @@
               <option value="auto">⚡ Auto (Wire)</option>
             </select>
           </div>
+          <div class="widget-label" style="display:flex; align-items:center; justify-content:space-between; gap:4px;">
+            <span>Target ROI Crop</span>
+            <select class="roi-preset-select" id="crop-preset-${node.id}" style="background:rgba(0,0,0,0.5); border:1px solid rgba(244,63,94,0.4); color:#fb7185; font-size:9.5px; border-radius:4px; padding:1px 4px; cursor:pointer;">
+              <option value="custom" ${currentPreset === "custom" ? "selected" : ""}>✏️ Custom ROI</option>
+              <option value="facecam_tl" ${currentPreset === "facecam_tl" ? "selected" : ""}>📷 Facecam (Top-Left)</option>
+              <option value="facecam_tr" ${currentPreset === "facecam_tr" ? "selected" : ""}>📷 Facecam (Top-Right)</option>
+              <option value="facecam_bl" ${currentPreset === "facecam_bl" ? "selected" : ""}>📷 Facecam (Bottom-Left)</option>
+              <option value="facecam_br" ${currentPreset === "facecam_br" ? "selected" : ""}>📷 Facecam (Bottom-Right)</option>
+              <option value="hud_bottom" ${currentPreset === "hud_bottom" ? "selected" : ""}>📊 Bottom HUD / Balance</option>
+              <option value="gameplay_center" ${currentPreset === "gameplay_center" ? "selected" : ""}>🎯 Center Gameplay</option>
+            </select>
+          </div>
+          <div class="node-roi-container roi-container-${node.id}">
+            <img class="roi-live-img" id="crop-live-img-${node.id}" style="display:none;" />
+            <div class="roi-placeholder-text" id="crop-placeholder-${node.id}">Unrouted (Connect Video In or Assign Stream)</div>
+          </div>
+          <div class="crop-coords-bar" id="crop-coords-${node.id}" style="display:flex; justify-content:space-between; font-size:9px; color:#94a3b8; margin-top:4px; padding:2px 4px; background:rgba(0,0,0,0.2); border-radius:4px;">
+            <span>X: ${Math.round(initialRoi.x * 100)}% Y: ${Math.round(initialRoi.y * 100)}%</span>
+            <span>Size: ${Math.round(initialRoi.w * 100)}% × ${Math.round(initialRoi.h * 100)}%</span>
+          </div>
+        `;
+
+        this.setupSourceSelect(widget, node);
+        bodyEl.appendChild(widget);
+
+        // Mount interactive draggable crop box
+        setTimeout(() => {
+          const container = widget.querySelector(`.roi-container-${node.id}`);
+          if (container) {
+            const ctrl = this.setupDraggableRoiBox(container, initialRoi, "#f43f5e", "Crop", (roi, isFinal) => {
+              props.roi = roi;
+              props.x = roi.x;
+              props.y = roi.y;
+              props.w = roi.w;
+              props.h = roi.h;
+              const coordsEl = widget.querySelector(`#crop-coords-${node.id}`);
+              if (coordsEl) {
+                coordsEl.innerHTML = `<span>X: ${Math.round(roi.x * 100)}% Y: ${Math.round(roi.y * 100)}%</span><span>Size: ${Math.round(roi.w * 100)}% × ${Math.round(roi.h * 100)}%</span>`;
+              }
+              if (isFinal) {
+                this.syncNodeParamDebounced(node.id, "roi", roi);
+                this.showToast("Video Crop ROI calibrated");
+              }
+              this.updateDownstreamCroppedPreviews(node.id, roi);
+            });
+            this.nodeRoiControllers.set(`${node.id}:crop`, ctrl);
+
+            // Handle preset changes
+            const presetSelect = widget.querySelector(`#crop-preset-${node.id}`);
+            presetSelect?.addEventListener("change", (e) => {
+              const pVal = e.target.value;
+              props.preset = pVal;
+              let targetRoi = null;
+              if (pVal === "facecam_tl") targetRoi = { x: 0.02, y: 0.05, w: 0.22, h: 0.28 };
+              else if (pVal === "facecam_tr") targetRoi = { x: 0.76, y: 0.05, w: 0.22, h: 0.28 };
+              else if (pVal === "facecam_bl") targetRoi = { x: 0.02, y: 0.67, w: 0.22, h: 0.28 };
+              else if (pVal === "facecam_br") targetRoi = { x: 0.76, y: 0.67, w: 0.22, h: 0.28 };
+              else if (pVal === "hud_bottom") targetRoi = { x: 0.25, y: 0.85, w: 0.50, h: 0.13 };
+              else if (pVal === "gameplay_center") targetRoi = { x: 0.15, y: 0.15, w: 0.70, h: 0.70 };
+
+              if (targetRoi && ctrl) {
+                ctrl.update(targetRoi);
+                props.roi = targetRoi;
+                props.x = targetRoi.x;
+                props.y = targetRoi.y;
+                props.w = targetRoi.w;
+                props.h = targetRoi.h;
+                const coordsEl = widget.querySelector(`#crop-coords-${node.id}`);
+                if (coordsEl) {
+                  coordsEl.innerHTML = `<span>X: ${Math.round(targetRoi.x * 100)}% Y: ${Math.round(targetRoi.y * 100)}%</span><span>Size: ${Math.round(targetRoi.w * 100)}% × ${Math.round(targetRoi.h * 100)}%</span>`;
+                }
+                this.syncNodeParamDebounced(node.id, "roi", targetRoi);
+                this.syncNodeParamDebounced(node.id, "preset", pVal);
+                this.showToast(`Applied preset: ${pVal}`);
+                this.updateDownstreamCroppedPreviews(node.id, targetRoi);
+              }
+            });
+          }
+        }, 50);
+      } else if (node.type === "ImageScaleNode") {
+        const widget = document.createElement("div");
+        widget.setAttribute("class", "node-widget scaler-widget");
+        const curFactor = props.scale_factor !== undefined ? props.scale_factor : 2.0;
+        const curAlgo = props.algorithm || "bicubic";
+        const curSharpen = props.sharpen_strength !== undefined ? props.sharpen_strength : 0.5;
+
+        widget.innerHTML = `
+          <div class="node-source-row" style="margin-bottom:6px; display:flex; align-items:center; justify-content:space-between; gap:6px; background:rgba(0,0,0,0.25); padding:3px 6px; border-radius:4px;">
+            <span style="font-size:10px; color:#94a3b8; white-space:nowrap;">Stream Source:</span>
+            <select class="node-source-select" id="source-select-${node.id}" style="flex:1; max-width:140px; background:rgba(0,0,0,0.5); border:1px solid rgba(56,189,248,0.3); color:#38bdf8; font-size:10px; border-radius:4px; padding:2px 4px; cursor:pointer;">
+              <option value="auto">⚡ Auto (Wire)</option>
+            </select>
+          </div>
+          <div class="node-algo-row" style="margin-bottom:6px; display:flex; align-items:center; justify-content:space-between; gap:6px; background:rgba(0,0,0,0.25); padding:3px 6px; border-radius:4px;">
+            <span style="font-size:10px; color:#94a3b8; white-space:nowrap;">Algorithm:</span>
+            <select class="scaler-algo-select" id="algo-select-${node.id}" style="flex:1; max-width:150px; background:rgba(0,0,0,0.5); border:1px solid rgba(14,165,233,0.4); color:#38bdf8; font-size:9.5px; border-radius:4px; padding:2px 4px; cursor:pointer;">
+              <optgroup label="⚡ Classical Resamplers">
+                <option value="lanczos4" ${curAlgo === "lanczos4" ? "selected" : ""}>Lanczos-4 (High Quality)</option>
+                <option value="bicubic" ${curAlgo === "bicubic" ? "selected" : ""}>Bicubic (Sharp)</option>
+                <option value="bilinear" ${curAlgo === "bilinear" ? "selected" : ""}>Bilinear (Fast Smooth)</option>
+                <option value="area" ${curAlgo === "area" ? "selected" : ""}>Area (Downsample Clean)</option>
+                <option value="nearest" ${curAlgo === "nearest" ? "selected" : ""}>Nearest (Pixel Art / Fast)</option>
+              </optgroup>
+              <optgroup label="✨ Detail & Contrast">
+                <option value="unsharp_mask" ${curAlgo === "unsharp_mask" ? "selected" : ""}>Unsharp Mask (Crisp Edges)</option>
+                <option value="clahe" ${curAlgo === "clahe" ? "selected" : ""}>CLAHE (Local Contrast)</option>
+                <option value="bilateral" ${curAlgo === "bilateral" ? "selected" : ""}>Bilateral (Denoise & Edge)</option>
+              </optgroup>
+              <optgroup label="🧠 Neural AI Super-Res">
+                <option value="neural_subpixel" ${curAlgo === "neural_subpixel" ? "selected" : ""}>ESPCN Sub-Pixel (ONNX AI)</option>
+              </optgroup>
+            </select>
+          </div>
+          <div class="widget-label" style="display:flex; align-items:center; justify-content:space-between; gap:4px; margin-bottom:4px;">
+            <span>Scale Multiplier</span>
+            <div class="scale-pills" id="scale-pills-${node.id}" style="display:inline-flex; gap:3px;">
+              <button type="button" class="scale-pill-btn" data-scale="0.5" style="border:none; background:${Math.abs(curFactor - 0.5) < 0.05 ? 'rgba(56,189,248,0.3)' : 'rgba(255,255,255,0.08)'}; color:${Math.abs(curFactor - 0.5) < 0.05 ? '#38bdf8' : '#94a3b8'}; font-size:9px; font-weight:700; padding:1px 5px; border-radius:3px; cursor:pointer;">0.5x</button>
+              <button type="button" class="scale-pill-btn" data-scale="1.0" style="border:none; background:${Math.abs(curFactor - 1.0) < 0.05 ? 'rgba(56,189,248,0.3)' : 'rgba(255,255,255,0.08)'}; color:${Math.abs(curFactor - 1.0) < 0.05 ? '#38bdf8' : '#94a3b8'}; font-size:9px; font-weight:700; padding:1px 5px; border-radius:3px; cursor:pointer;">1.0x</button>
+              <button type="button" class="scale-pill-btn" data-scale="2.0" style="border:none; background:${Math.abs(curFactor - 2.0) < 0.05 ? 'rgba(56,189,248,0.3)' : 'rgba(255,255,255,0.08)'}; color:${Math.abs(curFactor - 2.0) < 0.05 ? '#38bdf8' : '#94a3b8'}; font-size:9px; font-weight:700; padding:1px 5px; border-radius:3px; cursor:pointer;">2.0x</button>
+              <button type="button" class="scale-pill-btn" data-scale="4.0" style="border:none; background:${Math.abs(curFactor - 4.0) < 0.05 ? 'rgba(56,189,248,0.3)' : 'rgba(255,255,255,0.08)'}; color:${Math.abs(curFactor - 4.0) < 0.05 ? '#38bdf8' : '#94a3b8'}; font-size:9px; font-weight:700; padding:1px 5px; border-radius:3px; cursor:pointer;">4.0x</button>
+            </div>
+          </div>
+          <div class="node-roi-container roi-container-${node.id}">
+            <img class="roi-live-img" id="scale-live-img-${node.id}" style="display:none;" />
+            <div class="roi-placeholder-text" id="scale-placeholder-${node.id}">Unrouted (Connect Video In or Crop Node)</div>
+            <div class="crop-source-badge" id="scale-crop-badge-${node.id}" style="display:none; position:absolute; top:4px; right:4px; font-size:9px; background:rgba(14,165,233,0.85); color:#fff; padding:1px 5px; border-radius:3px; font-weight:600; pointer-events:none; z-index:2; backdrop-filter:blur(4px);">🔬 SCALED</div>
+          </div>
+          <div class="scale-status-bar" style="display:flex; justify-content:space-between; align-items:center; font-size:9px; color:#94a3b8; margin-top:5px; padding:3px 6px; background:rgba(0,0,0,0.35); border-radius:4px; border:1px solid rgba(255,255,255,0.05); font-family:monospace;">
+            <span id="scale-dim-badge-${node.id}" style="color:#38bdf8; font-weight:700;">--x-- ➔ --x-- (${curFactor}x)</span>
+            <span id="scale-latency-tag-${node.id}" style="color:#06b6d4;">-- ms</span>
+          </div>
+          <div style="display:flex; justify-content:space-between; font-size:9px; color:#94a3b8; margin-top:6px;">
+            <span id="scale-factor-label-${node.id}">Multiplier: ${curFactor}x</span>
+            <span id="scale-sharpen-label-${node.id}">Sharpen: ${curSharpen}</span>
+          </div>
+          <div style="display:flex; gap:8px; margin-top:2px;">
+            <input type="range" class="node-slider scale-factor-slider" id="scale-factor-slider-${node.id}" min="0.25" max="4.0" step="0.25" value="${curFactor}" style="flex:1;" />
+            <input type="range" class="node-slider scale-sharpen-slider" id="scale-sharpen-slider-${node.id}" min="0.0" max="2.0" step="0.1" value="${curSharpen}" style="flex:1;" />
+          </div>
+        `;
+
+        const factorSlider = widget.querySelector(`#scale-factor-slider-${node.id}`);
+        const sharpenSlider = widget.querySelector(`#scale-sharpen-slider-${node.id}`);
+        const factorLabel = widget.querySelector(`#scale-factor-label-${node.id}`);
+        const sharpenLabel = widget.querySelector(`#scale-sharpen-label-${node.id}`);
+        const pillsBox = widget.querySelector(`#scale-pills-${node.id}`);
+
+        const updatePillStyles = (val) => {
+          if (pillsBox) {
+            pillsBox.querySelectorAll(".scale-pill-btn").forEach(btn => {
+              const bVal = parseFloat(btn.dataset.scale);
+              const isActive = Math.abs(bVal - val) < 0.05;
+              btn.style.background = isActive ? "rgba(56,189,248,0.3)" : "rgba(255,255,255,0.08)";
+              btn.style.color = isActive ? "#38bdf8" : "#94a3b8";
+            });
+          }
+        };
+
+        factorSlider?.addEventListener("input", (e) => {
+          const val = parseFloat(e.target.value);
+          props.scale_factor = val;
+          if (factorLabel) factorLabel.textContent = `Multiplier: ${val}x`;
+          updatePillStyles(val);
+          this.syncNodeParamDebounced(node.id, "scale_factor", val);
+        });
+
+        sharpenSlider?.addEventListener("input", (e) => {
+          const val = parseFloat(e.target.value);
+          props.sharpen_strength = val;
+          if (sharpenLabel) sharpenLabel.textContent = `Sharpen: ${val}`;
+          this.syncNodeParamDebounced(node.id, "sharpen_strength", val);
+        });
+
+        pillsBox?.querySelectorAll(".scale-pill-btn").forEach(btn => {
+          btn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            const val = parseFloat(btn.dataset.scale);
+            props.scale_factor = val;
+            if (factorSlider) factorSlider.value = val;
+            if (factorLabel) factorLabel.textContent = `Multiplier: ${val}x`;
+            updatePillStyles(val);
+            this.syncNodeParamDebounced(node.id, "scale_factor", val);
+            this.showToast(`Scale factor set to ${val}x`);
+          });
+        });
+
+        const algoSelect = widget.querySelector(`#algo-select-${node.id}`);
+        algoSelect?.addEventListener("change", (e) => {
+          const val = e.target.value;
+          props.algorithm = val;
+          this.syncNodeParamDebounced(node.id, "algorithm", val);
+          this.showToast(`Switched algorithm to ${val}`);
+        });
+
+        this.setupSourceSelect(widget, node);
+        bodyEl.appendChild(widget);
+      } else if (node.type === "FacecamEmotionNode") {
+        const widget = document.createElement("div");
+        widget.setAttribute("class", "node-widget");
+        const tiltThresh = props.tilt_threshold !== undefined ? props.tilt_threshold : 65.0;
+        const curModel = props.model || "ferplus";
+        widget.innerHTML = `
+          <div class="node-source-row" style="margin-bottom:6px; display:flex; align-items:center; justify-content:space-between; gap:6px; background:rgba(0,0,0,0.25); padding:3px 6px; border-radius:4px;">
+            <span style="font-size:10px; color:#94a3b8; white-space:nowrap;">Stream Source:</span>
+            <select class="node-source-select" id="source-select-${node.id}" style="flex:1; max-width:140px; background:rgba(0,0,0,0.5); border:1px solid rgba(56,189,248,0.3); color:#38bdf8; font-size:10px; border-radius:4px; padding:2px 4px; cursor:pointer;">
+              <option value="auto">⚡ Auto (Wire)</option>
+            </select>
+          </div>
+          <div class="node-model-row" style="margin-bottom:6px; display:flex; align-items:center; justify-content:space-between; gap:6px; background:rgba(0,0,0,0.25); padding:3px 6px; border-radius:4px;">
+            <span style="font-size:10px; color:#94a3b8; white-space:nowrap;">Model Engine:</span>
+            <select class="node-model-select" id="model-select-${node.id}" style="flex:1; max-width:140px; background:rgba(0,0,0,0.5); border:1px solid rgba(168,85,247,0.4); color:#c084fc; font-size:10px; border-radius:4px; padding:2px 4px; cursor:pointer;">
+              <option value="ferplus" ${curModel === "ferplus" ? "selected" : ""}>🧠 FERPlus (8-Class ONNX)</option>
+              <option value="mobilefacenet" ${curModel === "mobilefacenet" ? "selected" : ""}>⚡ MobileFaceNet (7-Class)</option>
+            </select>
+          </div>
           <div class="widget-label">
-            <span>Facecam ROI & Emotional Dynamics</span>
+            <span>Emotional Dynamics & Tilt</span>
             <span class="widget-val" id="face-top-val-${node.id}">STANDBY</span>
           </div>
           <div class="node-roi-container roi-container-${node.id}">
             <img class="roi-live-img" id="face-live-img-${node.id}" style="display:none;" />
-            <div class="roi-placeholder-text" id="face-placeholder-${node.id}">Unrouted (Connect Video In or Assign Stream)</div>
+            <div class="roi-placeholder-text" id="face-placeholder-${node.id}">Unrouted (Connect Video In or Crop Node)</div>
+            <div class="crop-source-badge" id="face-crop-badge-${node.id}" style="display:none; position:absolute; top:4px; right:4px; font-size:9px; background:rgba(244,63,94,0.85); color:#fff; padding:1px 5px; border-radius:3px; font-weight:600; pointer-events:none; z-index:2; backdrop-filter:blur(4px);">✂️ CROPPED</div>
           </div>
           <div class="tilt-card">
             <div class="tilt-meter-box">
@@ -1232,6 +2061,13 @@
               <div class="valence-indicator" id="face-valence-ind-${node.id}" style="left: 50%;"></div>
             </div>
           </div>
+          <div class="face-mode-toggle-row" style="margin-top:8px; margin-bottom:4px; display:flex; justify-content:space-between; align-items:center;">
+            <span style="font-size:9px; color:#94a3b8; font-weight:700; text-transform:uppercase; letter-spacing:0.5px;">Output Metrics</span>
+            <div class="face-mode-switch" id="face-mode-switch-${node.id}" style="display:inline-flex; background:rgba(0,0,0,0.4); border:1px solid rgba(255,255,255,0.08); border-radius:4px; padding:2px; gap:2px;">
+              <button type="button" class="mode-btn mode-btn-probs" data-mode="probs" style="border:none; background:${props.display_mode !== 'logits' ? 'rgba(56,189,248,0.25)' : 'transparent'}; color:${props.display_mode !== 'logits' ? '#38bdf8' : '#94a3b8'}; font-size:9px; font-weight:600; padding:2px 7px; border-radius:3px; cursor:pointer; transition:all 0.15s ease;">% Probs</button>
+              <button type="button" class="mode-btn mode-btn-logits" data-mode="logits" style="border:none; background:${props.display_mode === 'logits' ? 'rgba(168,85,247,0.25)' : 'transparent'}; color:${props.display_mode === 'logits' ? '#c084fc' : '#94a3b8'}; font-size:9px; font-weight:600; padding:2px 7px; border-radius:3px; cursor:pointer; transition:all 0.15s ease;">Raw Logits</button>
+            </div>
+          </div>
           <div class="cv-bars-box" id="face-bars-${node.id}">
             <div style="color:#475569; font-size:10px; text-align:center; padding:8px 0;">No active stream routed</div>
           </div>
@@ -1247,131 +2083,34 @@
           widget.querySelector(`#tilt-thresh-label-${node.id}`).textContent = `Tilt Trigger Threshold: ≥ ${props.tilt_threshold}`;
           this.syncNodeParamDebounced(node.id, "tilt_threshold", props.tilt_threshold);
         });
-        this.setupSourceSelect(widget, node);
-        bodyEl.appendChild(widget);
-
-        // Mount interactive draggable facecam ROI box
-        setTimeout(() => {
-          const container = widget.querySelector(`.roi-container-${node.id}`);
-          if (container) {
-            const initialRoi = props.face_roi || { x: 0.02, y: 0.05, w: 0.22, h: 0.28 };
-            props.face_roi = initialRoi;
-            const ctrl = this.setupDraggableRoiBox(container, initialRoi, "#06b6d4", "Facecam", (roi, isFinal) => {
-              props.face_roi = roi;
-              if (isFinal) {
-                this.syncNodeParamDebounced(node.id, "face_roi", roi);
-                this.showToast("Streamer Facecam ROI calibrated");
+        const modelSelect = widget.querySelector(`#model-select-${node.id}`);
+        if (modelSelect) {
+          modelSelect.addEventListener("change", (e) => {
+            props.model = e.target.value;
+            this.syncNodeParamDebounced(node.id, "model", props.model);
+            this.showToast(`Switched emotion model to ${props.model === "ferplus" ? "FERPlus (8-Class ONNX)" : "MobileFaceNet"}`);
+          });
+        }
+        const modeSwitch = widget.querySelector(`#face-mode-switch-${node.id}`);
+        if (modeSwitch) {
+          modeSwitch.querySelectorAll(".mode-btn").forEach(btn => {
+            btn.addEventListener("click", (e) => {
+              e.stopPropagation();
+              const targetMode = btn.dataset.mode;
+              props.display_mode = targetMode;
+              modeSwitch.querySelectorAll(".mode-btn").forEach(b => {
+                const isActive = b.dataset.mode === targetMode;
+                b.style.background = isActive ? (targetMode === "logits" ? "rgba(168,85,247,0.25)" : "rgba(56,189,248,0.25)") : "transparent";
+                b.style.color = isActive ? (targetMode === "logits" ? "#c084fc" : "#38bdf8") : "#94a3b8";
+              });
+              if (this.latestTelemetry) {
+                this.applyTelemetry(this.latestTelemetry);
               }
             });
-            this.nodeRoiControllers.set(`${node.id}:face`, ctrl);
-          }
-        }, 50);
-      } else if (node.type === "GamblingOCRNode") {
-        const widget = document.createElement("div");
-        widget.setAttribute("class", "node-widget");
-        const currentPreset = props.preset || "pragmatic_standard";
-        widget.innerHTML = `
-          <div class="node-source-row" style="margin-bottom:6px; display:flex; align-items:center; justify-content:space-between; gap:6px; background:rgba(0,0,0,0.25); padding:3px 6px; border-radius:4px;">
-            <span style="font-size:10px; color:#94a3b8; white-space:nowrap;">Stream Source:</span>
-            <select class="node-source-select" id="source-select-${node.id}" style="flex:1; max-width:140px; background:rgba(0,0,0,0.5); border:1px solid rgba(56,189,248,0.3); color:#38bdf8; font-size:10px; border-radius:4px; padding:2px 4px; cursor:pointer;">
-              <option value="auto">⚡ Auto (Wire)</option>
-            </select>
-          </div>
-          <div class="widget-label">
-            <span>Casino Slot Multi-Region HUD</span>
-            <span class="widget-val" id="g-spin-state-${node.id}" style="color: #64748b;">UNROUTED</span>
-          </div>
-          <div class="roi-tab-bar" id="g-tabs-${node.id}">
-            <button class="roi-tab-btn active" data-target="all">👁️ All ROIs</button>
-            <button class="roi-tab-btn" data-target="balance" style="color:#10b981;">🟩 Balance</button>
-            <button class="roi-tab-btn" data-target="bet" style="color:#38bdf8;">🟦 Bet Size</button>
-            <button class="roi-tab-btn" data-target="win" style="color:#f59e0b;">🟨 Win Payout</button>
-            <button class="roi-tab-btn" data-target="reels" style="color:#a855f7;">🟪 Reels Area</button>
-          </div>
-          <div class="node-roi-container roi-container-${node.id}">
-            <img class="roi-live-img" id="g-live-img-${node.id}" style="display:none;" />
-            <div class="roi-placeholder-text" id="g-placeholder-${node.id}">Unrouted (Connect Video In or Assign Stream)</div>
-          </div>
-          <div class="gambling-hud-grid">
-            <div class="hud-stat-cell">
-              <div class="hud-stat-lbl">Parsed Balance</div>
-              <div class="hud-stat-val" id="g-bal-val-${node.id}">$--</div>
-            </div>
-            <div class="hud-stat-cell">
-              <div class="hud-stat-lbl">Active Bet Size</div>
-              <div class="hud-stat-val" id="g-bet-val-${node.id}">$--</div>
-            </div>
-            <div class="hud-stat-cell">
-              <div class="hud-stat-lbl">Recent Win</div>
-              <div class="hud-stat-val" id="g-win-val-${node.id}">$--</div>
-            </div>
-            <div class="hud-stat-cell">
-              <div class="hud-stat-lbl">Multiplier</div>
-              <div class="hud-stat-val" id="g-mult-val-${node.id}">--x</div>
-            </div>
-          </div>
-          <div style="margin-top: 6px; display: flex; align-items: center; justify-content: space-between; gap: 6px;">
-            <span style="font-size: 9px; color: #94a3b8;">Coordinate Preset:</span>
-            <select class="node-channel-select g-preset-select" style="flex: 1; font-size: 10px; background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.15); border-radius: 4px; color: #f8fafc; padding: 2px 4px;">
-              <option value="pragmatic_standard" ${currentPreset === "pragmatic_standard" ? "selected" : ""}>Pragmatic Play Standard</option>
-              <option value="hacksaw_standard" ${currentPreset === "hacksaw_standard" ? "selected" : ""}>Hacksaw Gaming Standard</option>
-              <option value="stake_originals" ${currentPreset === "stake_originals" ? "selected" : ""}>Stake Originals HUD</option>
-              <option value="custom" ${currentPreset === "custom" ? "selected" : ""}>Custom ROI Layout</option>
-            </select>
-          </div>
-        `;
-        const presetSel = widget.querySelector(".g-preset-select");
-        presetSel.addEventListener("change", (e) => {
-          props.preset = e.target.value;
-          this.syncNodeParamDebounced(node.id, "preset", props.preset);
-          this.showToast(`Switched HUD preset to ${e.target.value}`);
-        });
+          });
+        }
         this.setupSourceSelect(widget, node);
         bodyEl.appendChild(widget);
-
-        // Mount interactive draggable boxes for balance, bet, win, reels
-        setTimeout(() => {
-          const container = widget.querySelector(`.roi-container-${node.id}`);
-          if (container) {
-            props.rois = props.rois || {
-              balance: { x: 0.05, y: 0.92, w: 0.18, h: 0.06 },
-              bet: { x: 0.42, y: 0.92, w: 0.16, h: 0.06 },
-              win: { x: 0.35, y: 0.50, w: 0.30, h: 0.14 },
-              reels: { x: 0.20, y: 0.15, w: 0.60, h: 0.70 },
-            };
-            const colors = { balance: "#10b981", bet: "#38bdf8", win: "#f59e0b", reels: "#a855f7" };
-            const ctrls = {};
-            for (const [key, rval] of Object.entries(props.rois)) {
-              ctrls[key] = this.setupDraggableRoiBox(container, rval, colors[key] || "#10b981", key.toUpperCase(), (roi, isFinal) => {
-                props.rois[key] = roi;
-                if (isFinal) {
-                  this.syncNodeParamDebounced(node.id, `roi_${key}`, roi);
-                  this.syncNodeParamDebounced(node.id, "rois", props.rois);
-                  this.showToast(`Updated ${key.toUpperCase()} ROI`);
-                }
-              });
-            }
-            this.nodeRoiControllers.set(`${node.id}:gambling`, ctrls);
-
-            // Tab bar switcher
-            const tabs = widget.querySelectorAll(".roi-tab-btn");
-            tabs.forEach((tab) => {
-              tab.addEventListener("click", () => {
-                tabs.forEach((t) => t.classList.remove("active"));
-                tab.classList.add("active");
-                const target = tab.getAttribute("data-target");
-                if (target === "all") {
-                  Object.values(ctrls).forEach((c) => { c.setVisible(true); c.setActive(false); });
-                } else {
-                  Object.entries(ctrls).forEach(([k, c]) => {
-                    c.setVisible(true);
-                    c.setActive(k === target);
-                  });
-                }
-              });
-            });
-          }
-        }, 50);
       } else if (node.type === "GamblingLedgerNode") {
         const widget = document.createElement("div");
         widget.setAttribute("class", "node-widget");
@@ -1481,6 +2220,8 @@
         `;
         this.setupSourceSelect(widget, node);
         bodyEl.appendChild(widget);
+      } else if (node.type === "ThresholdGateNode") {
+        this.renderThresholdGateWidget(node, bodyEl);
       } else if (node.type === "HardwareRenderNode") {
         const widget = document.createElement("div");
         widget.setAttribute("class", "node-widget");
@@ -1568,6 +2309,184 @@
       }
     }
 
+    renderThresholdGateWidget(node, bodyEl) {
+      const props = node.properties || {};
+      const rules = props.rules || {};
+      const logicMode = props.logic_mode || "ALL";
+      const minCount = props.min_count !== undefined ? props.min_count : 1;
+      const debounceSec = props.debounce_seconds !== undefined ? props.debounce_seconds : 10.0;
+      const showSliders = props.show_sliders !== undefined ? Boolean(props.show_sliders) : true;
+
+      const widget = document.createElement("div");
+      widget.setAttribute("class", `node-widget threshold-gate-widget ${showSliders ? "" : "sliders-hidden"}`);
+      widget.setAttribute("id", `threshold-gate-widget-${node.id}`);
+
+      // Top control bar
+      const topBarHtml = `
+        <div class="gate-header-controls">
+          <div class="gate-control-group">
+            <label class="gate-control-label">Scenario:</label>
+            <select class="gate-select gate-logic-mode-select" id="gate-logic-${node.id}">
+              <option value="ALL" ${logicMode === "ALL" ? "selected" : ""}>ALL (AND)</option>
+              <option value="ANY" ${logicMode === "ANY" ? "selected" : ""}>ANY (OR)</option>
+              <option value="COUNT" ${logicMode === "COUNT" ? "selected" : ""}>COUNT (≥ N)</option>
+            </select>
+          </div>
+          <div class="gate-control-group count-group" id="gate-count-group-${node.id}" style="${logicMode === 'COUNT' ? '' : 'display:none;'}">
+            <label class="gate-control-label">Min:</label>
+            <input type="number" class="gate-input-number gate-min-count-input" id="gate-min-count-${node.id}" value="${minCount}" min="1" max="20" style="width: 36px;" />
+          </div>
+          <div class="gate-control-group">
+            <label class="gate-control-label">Cooldown:</label>
+            <input type="number" class="gate-input-number gate-debounce-input" id="gate-debounce-${node.id}" value="${debounceSec}" min="1" max="120" step="1" style="width: 40px;" />
+            <span class="gate-unit-text">s</span>
+          </div>
+          <button type="button" class="gate-slider-toggle-btn ${showSliders ? 'active' : ''}" id="gate-slider-toggle-${node.id}" title="Toggle Sliders Display">
+            ${showSliders ? '🎚️ Sliders: On' : '🎚️ Sliders: Off'}
+          </button>
+        </div>
+
+        <div class="gate-status-bar">
+          <span class="gate-count-badge" id="gate-count-badge-${node.id}">0/0 Passed</span>
+          <span class="gate-status-pill standby" id="gate-status-${node.id}">STANDBY</span>
+        </div>
+
+        <div class="gate-rules-list" id="gate-rules-list-${node.id}"></div>
+      `;
+
+      widget.innerHTML = topBarHtml;
+      const rulesListEl = widget.querySelector(`#gate-rules-list-${node.id}`);
+
+      // Render rule rows for each input
+      (node.inputs || []).forEach((inp) => {
+        const portId = inp.id;
+        const rule = rules[portId] || {
+          operator: ">=",
+          threshold: 0.5,
+          min: 0.0,
+          max: 1.0,
+          step: 0.01,
+          unit: "",
+          label: inp.name || portId,
+        };
+
+        const ruleRow = document.createElement("div");
+        ruleRow.setAttribute("class", "gate-rule-item");
+        ruleRow.setAttribute("id", `gate-rule-${node.id}-${portId}`);
+
+        const minVal = rule.min !== undefined ? rule.min : 0.0;
+        const maxVal = rule.max !== undefined ? rule.max : 1.0;
+        const stepVal = rule.step !== undefined ? rule.step : 0.01;
+        const currentThresh = rule.threshold !== undefined ? rule.threshold : 0.5;
+        const op = rule.operator || ">=";
+        const label = rule.label || inp.name || portId;
+        const unit = rule.unit || "";
+
+        ruleRow.innerHTML = `
+          <div class="gate-rule-header">
+            <div class="gate-rule-name-wrap">
+              <span class="gate-pass-icon unconnected" id="gate-pass-${node.id}-${portId}" title="Unconnected">⚪</span>
+              <span class="gate-rule-label" title="${label}">${label}</span>
+            </div>
+            <div class="gate-rule-op-wrap">
+              <select class="gate-select gate-op-select" data-port="${portId}">
+                <option value=">=" ${op === ">=" ? "selected" : ""}>&ge; (At least)</option>
+                <option value=">" ${op === ">" ? "selected" : ""}>&gt; (Above)</option>
+                <option value="<=" ${op === "<=" ? "selected" : ""}>&le; (At most)</option>
+                <option value="<" ${op === "<" ? "selected" : ""}>&lt; (Below)</option>
+                <option value="==" ${op === "==" ? "selected" : ""}>= (Equal)</option>
+              </select>
+              <input type="number" class="gate-input-number gate-thresh-input" data-port="${portId}" value="${currentThresh}" min="${minVal}" max="${maxVal}" step="${stepVal}" />
+              <span class="gate-unit-text">${unit}</span>
+              <div class="gate-val-badge" id="gate-val-${node.id}-${portId}">--</div>
+            </div>
+          </div>
+          <div class="gate-slider-row">
+            <span class="gate-range-bound min">${minVal}${unit}</span>
+            <input type="range" class="gate-slider" data-port="${portId}" min="${minVal}" max="${maxVal}" step="${stepVal}" value="${currentThresh}" />
+            <span class="gate-range-bound max">${maxVal}${unit}</span>
+          </div>
+        `;
+
+        // Event listeners for rule controls
+        const opSelect = ruleRow.querySelector(".gate-op-select");
+        const threshInput = ruleRow.querySelector(".gate-thresh-input");
+        const sliderInput = ruleRow.querySelector(".gate-slider");
+
+        opSelect.addEventListener("change", (e) => {
+          rule.operator = e.target.value;
+          if (!node.properties) node.properties = {};
+          if (!node.properties.rules) node.properties.rules = {};
+          node.properties.rules[portId] = rule;
+          this.syncNodeParamDebounced(node.id, "rules", node.properties.rules);
+          if (this.latestTelemetry) this.applyTelemetry(this.latestTelemetry);
+        });
+
+        const updateThresh = (val) => {
+          const numVal = parseFloat(val);
+          if (isNaN(numVal)) return;
+          rule.threshold = numVal;
+          threshInput.value = numVal;
+          sliderInput.value = numVal;
+          if (!node.properties) node.properties = {};
+          if (!node.properties.rules) node.properties.rules = {};
+          node.properties.rules[portId] = rule;
+          this.syncNodeParamDebounced(node.id, "rules", node.properties.rules);
+          if (this.latestTelemetry) this.applyTelemetry(this.latestTelemetry);
+        };
+
+        threshInput.addEventListener("input", (e) => updateThresh(e.target.value));
+        sliderInput.addEventListener("input", (e) => updateThresh(e.target.value));
+
+        rulesListEl.appendChild(ruleRow);
+      });
+
+      // Top control listeners
+      const logicSelect = widget.querySelector(`#gate-logic-${node.id}`);
+      const countGroup = widget.querySelector(`#gate-count-group-${node.id}`);
+      const minCountInput = widget.querySelector(`#gate-min-count-${node.id}`);
+      const debounceInput = widget.querySelector(`#gate-debounce-${node.id}`);
+      const sliderToggleBtn = widget.querySelector(`#gate-slider-toggle-${node.id}`);
+
+      logicSelect.addEventListener("change", (e) => {
+        const val = e.target.value;
+        node.properties.logic_mode = val;
+        countGroup.style.display = val === "COUNT" ? "" : "none";
+        this.syncNodeParamDebounced(node.id, "logic_mode", val);
+        if (this.latestTelemetry) this.applyTelemetry(this.latestTelemetry);
+      });
+
+      minCountInput.addEventListener("input", (e) => {
+        const val = parseInt(e.target.value, 10) || 1;
+        node.properties.min_count = val;
+        this.syncNodeParamDebounced(node.id, "min_count", val);
+        if (this.latestTelemetry) this.applyTelemetry(this.latestTelemetry);
+      });
+
+      debounceInput.addEventListener("input", (e) => {
+        const val = parseFloat(e.target.value) || 10.0;
+        node.properties.debounce_seconds = val;
+        this.syncNodeParamDebounced(node.id, "debounce_seconds", val);
+      });
+
+      sliderToggleBtn.addEventListener("click", () => {
+        const newShow = !widget.classList.contains("sliders-hidden") ? false : true;
+        node.properties.show_sliders = newShow;
+        if (newShow) {
+          widget.classList.remove("sliders-hidden");
+          sliderToggleBtn.classList.add("active");
+          sliderToggleBtn.textContent = "🎚️ Sliders: On";
+        } else {
+          widget.classList.add("sliders-hidden");
+          sliderToggleBtn.classList.remove("active");
+          sliderToggleBtn.textContent = "🎚️ Sliders: Off";
+        }
+        this.syncNodeParamDebounced(node.id, "show_sliders", newShow);
+      });
+
+      bodyEl.appendChild(widget);
+    }
+
     /* -------------------------------------------------------------
        Real-Time Telemetry & Visual Pulses
        ------------------------------------------------------------- */
@@ -1639,6 +2558,74 @@
               }
             }
           }
+          return;
+        }
+
+        if (node.type === "ThresholdGateNode") {
+          const nodesData = telemetry.nodes || {};
+          const gateData = nodesData[node.id] || {};
+          const statusEl = document.getElementById(`gate-status-${node.id}`);
+          const countBadgeEl = document.getElementById(`gate-count-badge-${node.id}`);
+
+          const passedCount = gateData.passed_count ?? 0;
+          const totalConnected = gateData.total_connected ?? 0;
+          const gateFired = Boolean(gateData.gate_fired);
+          const isDebouncing = Boolean(gateData.is_debouncing);
+          const debounceRemaining = gateData.debounce_remaining ?? 0;
+          const isTrigger = Boolean(gateData.is_trigger);
+
+          if (countBadgeEl) {
+            countBadgeEl.textContent = `${passedCount}/${totalConnected} Passed`;
+          }
+
+          if (statusEl) {
+            if (isTrigger || gateFired) {
+              statusEl.textContent = isDebouncing ? `COOLDOWN (${debounceRemaining}s)` : "TRIGGER FIRED ⚡";
+              statusEl.className = "gate-status-pill " + (isDebouncing ? "cooldown" : "fired");
+              if (isTrigger) {
+                this.pulseWiresFromNode(node.id);
+              }
+            } else if (totalConnected === 0) {
+              statusEl.textContent = "STANDBY";
+              statusEl.className = "gate-status-pill standby";
+            } else {
+              statusEl.textContent = isDebouncing ? `COOLDOWN (${debounceRemaining}s)` : "MONITORING";
+              statusEl.className = "gate-status-pill " + (isDebouncing ? "cooldown" : "monitoring");
+            }
+          }
+
+          // Update per-input live readouts and status checkmarks
+          const inputsData = gateData.inputs || {};
+          (node.inputs || []).forEach((inp) => {
+            const pinData = inputsData[inp.id];
+            const liveValEl = document.getElementById(`gate-val-${node.id}-${inp.id}`);
+            const passIconEl = document.getElementById(`gate-pass-${node.id}-${inp.id}`);
+            if (liveValEl && pinData) {
+              if (pinData.value !== null && pinData.value !== undefined) {
+                const formatted = typeof pinData.value === "number"
+                  ? (Math.abs(pinData.value) < 1 && pinData.value !== 0 ? pinData.value.toFixed(2) : Math.round(pinData.value * 10) / 10)
+                  : pinData.value;
+                liveValEl.textContent = `${formatted}${pinData.unit || ""}`;
+              } else {
+                liveValEl.textContent = "--";
+              }
+            }
+            if (passIconEl && pinData) {
+              if (!pinData.connected) {
+                passIconEl.textContent = "⚪";
+                passIconEl.title = "Not connected";
+                passIconEl.className = "gate-pass-icon unconnected";
+              } else if (pinData.passed) {
+                passIconEl.textContent = "✅";
+                passIconEl.title = "Condition met";
+                passIconEl.className = "gate-pass-icon passed";
+              } else {
+                passIconEl.textContent = "❌";
+                passIconEl.title = "Condition not met";
+                passIconEl.className = "gate-pass-icon failed";
+              }
+            }
+          });
           return;
         }
 
@@ -1738,7 +2725,33 @@
           const ocrPlaceholder = document.getElementById(`ocr-placeholder-${node.id}`);
           const frameB64 = nodeSession.stream_frame_b64 || nodeSession.cv_thumbnail_b64;
           if (ocrImg && frameB64) {
-            ocrImg.src = frameB64;
+            const upstreamCrop = this.getNodeUpstreamCropRoi(node);
+            if (upstreamCrop) {
+              const roi = upstreamCrop.roi;
+              const leftPct = -(roi.x / roi.w) * 100;
+              const topPct = -(roi.y / roi.h) * 100;
+              const widthPct = (1 / roi.w) * 100;
+              const heightPct = (1 / roi.h) * 100;
+              ocrImg.src = frameB64;
+              ocrImg.style.position = "absolute";
+              ocrImg.style.width = `${widthPct}%`;
+              ocrImg.style.height = `${heightPct}%`;
+              ocrImg.style.left = `${leftPct}%`;
+              ocrImg.style.top = `${topPct}%`;
+              ocrImg.style.maxWidth = "none";
+              ocrImg.style.maxHeight = "none";
+              ocrImg.style.objectFit = "fill";
+            } else {
+              ocrImg.src = frameB64;
+              ocrImg.style.position = "absolute";
+              ocrImg.style.width = "100%";
+              ocrImg.style.height = "100%";
+              ocrImg.style.left = "0px";
+              ocrImg.style.top = "0px";
+              ocrImg.style.maxWidth = "100%";
+              ocrImg.style.maxHeight = "100%";
+              ocrImg.style.objectFit = "fill";
+            }
             ocrImg.style.display = "block";
             if (ocrPlaceholder) ocrPlaceholder.style.display = "none";
           }
@@ -1752,9 +2765,83 @@
               </div>
             `).join("");
           }
+        } else if (node.type === "VideoCropNode") {
+          const cropImg = document.getElementById(`crop-live-img-${node.id}`);
+          const cropPlaceholder = document.getElementById(`crop-placeholder-${node.id}`);
+          const frameB64 = nodeSession.stream_frame_b64 || nodeSession.cv_thumbnail_b64;
+          if (cropImg && frameB64) {
+            cropImg.src = frameB64;
+            cropImg.style.display = "block";
+            if (cropPlaceholder) cropPlaceholder.style.display = "none";
+          }
+        } else if (node.type === "ImageScaleNode") {
+          const scaleImg = document.getElementById(`scale-live-img-${node.id}`);
+          const scalePlaceholder = document.getElementById(`scale-placeholder-${node.id}`);
+          const scaleBadge = document.getElementById(`scale-dim-badge-${node.id}`);
+          const latencyTag = document.getElementById(`scale-latency-tag-${node.id}`);
+          const cropBadge = document.getElementById(`scale-crop-badge-${node.id}`);
+
+          const scalerThumb = nodeSession.scaler_thumbnail_b64;
+          const frameB64 = scalerThumb || nodeSession.stream_frame_b64 || nodeSession.cv_thumbnail_b64;
+
+          if (scaleImg && frameB64) {
+            const upstreamCrop = this.getNodeUpstreamCropRoi(node);
+            if (scalerThumb) {
+              scaleImg.src = scalerThumb;
+              scaleImg.style.position = "absolute";
+              scaleImg.style.width = "100%";
+              scaleImg.style.height = "100%";
+              scaleImg.style.left = "0px";
+              scaleImg.style.top = "0px";
+              scaleImg.style.maxWidth = "100%";
+              scaleImg.style.maxHeight = "100%";
+              scaleImg.style.objectFit = "contain";
+              if (cropBadge) cropBadge.style.display = upstreamCrop ? "block" : "none";
+            } else if (upstreamCrop) {
+              const roi = upstreamCrop.roi;
+              const leftPct = -(roi.x / roi.w) * 100;
+              const topPct = -(roi.y / roi.h) * 100;
+              const widthPct = (1 / roi.w) * 100;
+              const heightPct = (1 / roi.h) * 100;
+              scaleImg.src = frameB64;
+              scaleImg.style.position = "absolute";
+              scaleImg.style.width = `${widthPct}%`;
+              scaleImg.style.height = `${heightPct}%`;
+              scaleImg.style.left = `${leftPct}%`;
+              scaleImg.style.top = `${topPct}%`;
+              scaleImg.style.maxWidth = "none";
+              scaleImg.style.maxHeight = "none";
+              scaleImg.style.objectFit = "fill";
+              if (cropBadge) cropBadge.style.display = "block";
+            } else {
+              scaleImg.src = frameB64;
+              scaleImg.style.position = "absolute";
+              scaleImg.style.width = "100%";
+              scaleImg.style.height = "100%";
+              scaleImg.style.left = "0px";
+              scaleImg.style.top = "0px";
+              scaleImg.style.maxWidth = "100%";
+              scaleImg.style.maxHeight = "100%";
+              scaleImg.style.objectFit = "cover";
+              if (cropBadge) cropBadge.style.display = "none";
+            }
+            scaleImg.style.display = "block";
+            if (scalePlaceholder) scalePlaceholder.style.display = "none";
+          }
+
+          if (scaleBadge) {
+            const inRes = nodeSession.scaler_input_res || "—";
+            const outRes = nodeSession.scaler_output_res || "—";
+            const curFactor = node.properties?.scale_factor || 2.0;
+            scaleBadge.textContent = `${inRes} ➔ ${outRes} (${curFactor}x)`;
+          }
+          if (latencyTag && nodeSession.scaler_latency_ms !== undefined) {
+            latencyTag.textContent = `${nodeSession.scaler_latency_ms.toFixed(1)} ms`;
+          }
         } else if (node.type === "FacecamEmotionNode") {
           const faceImg = document.getElementById(`face-live-img-${node.id}`);
           const facePlaceholder = document.getElementById(`face-placeholder-${node.id}`);
+          const cropBadge = document.getElementById(`face-crop-badge-${node.id}`);
           const tiltNum = document.getElementById(`face-tilt-num-${node.id}`);
           const tiltPill = document.getElementById(`face-tilt-pill-${node.id}`);
           const topVal = document.getElementById(`face-top-val-${node.id}`);
@@ -1763,9 +2850,53 @@
           const valenceInd = document.getElementById(`face-valence-ind-${node.id}`);
           const barsBox = document.getElementById(`face-bars-${node.id}`);
 
-          const frameB64 = nodeSession.stream_frame_b64 || nodeSession.cv_thumbnail_b64;
+          const emoThumb = nodeSession.emotion_thumbnail_b64;
+          const frameB64 = emoThumb || nodeSession.stream_frame_b64 || nodeSession.cv_thumbnail_b64;
           if (faceImg && frameB64) {
-            faceImg.src = frameB64;
+            const upstreamCrop = this.getNodeUpstreamCropRoi(node);
+            if (emoThumb) {
+              // Backend already cropped this frame
+              faceImg.src = emoThumb;
+              faceImg.style.position = "absolute";
+              faceImg.style.width = "100%";
+              faceImg.style.height = "100%";
+              faceImg.style.left = "0px";
+              faceImg.style.top = "0px";
+              faceImg.style.maxWidth = "100%";
+              faceImg.style.maxHeight = "100%";
+              faceImg.style.objectFit = "cover";
+              if (cropBadge) cropBadge.style.display = upstreamCrop ? "block" : "none";
+            } else if (upstreamCrop) {
+              // Crop stream frame using upstream VideoCropNode ROI
+              const roi = upstreamCrop.roi;
+              const leftPct = -(roi.x / roi.w) * 100;
+              const topPct = -(roi.y / roi.h) * 100;
+              const widthPct = (1 / roi.w) * 100;
+              const heightPct = (1 / roi.h) * 100;
+
+              faceImg.src = frameB64;
+              faceImg.style.position = "absolute";
+              faceImg.style.width = `${widthPct}%`;
+              faceImg.style.height = `${heightPct}%`;
+              faceImg.style.left = `${leftPct}%`;
+              faceImg.style.top = `${topPct}%`;
+              faceImg.style.maxWidth = "none";
+              faceImg.style.maxHeight = "none";
+              faceImg.style.objectFit = "fill";
+              if (cropBadge) cropBadge.style.display = "block";
+            } else {
+              // Full frame fallback
+              faceImg.src = frameB64;
+              faceImg.style.position = "absolute";
+              faceImg.style.width = "100%";
+              faceImg.style.height = "100%";
+              faceImg.style.left = "0px";
+              faceImg.style.top = "0px";
+              faceImg.style.maxWidth = "100%";
+              faceImg.style.maxHeight = "100%";
+              faceImg.style.objectFit = "cover";
+              if (cropBadge) cropBadge.style.display = "none";
+            }
             faceImg.style.display = "block";
             if (facePlaceholder) facePlaceholder.style.display = "none";
           }
@@ -1810,54 +2941,66 @@
             }
           }
 
-          if (barsBox && nodeSession.emotion_distribution) {
-            const dist = nodeSession.emotion_distribution;
-            const barColors = { joy: "#34d399", rage: "#ef4444", shock: "#f59e0b", despair: "#a855f7", neutral: "#64748b" };
-            barsBox.innerHTML = Object.entries(dist).map(([emo, val]) => `
-              <div class="cv-prob-row">
-                <span class="cv-prob-label">${emo}</span>
-                <div class="cv-prob-track"><div class="cv-prob-fill" style="width: ${Math.round(val * 100)}%; background: ${barColors[emo] || '#38bdf8'};"></div></div>
-                <span class="cv-prob-pct" style="color: ${barColors[emo] || '#38bdf8'};">${Math.round(val * 100)}%</span>
-              </div>
-            `).join("");
-          }
-        } else if (node.type === "GamblingOCRNode") {
-          const gImg = document.getElementById(`g-live-img-${node.id}`);
-          const gPlaceholder = document.getElementById(`g-placeholder-${node.id}`);
-          const spinBadge = document.getElementById(`g-spin-state-${node.id}`);
-          const balVal = document.getElementById(`g-bal-val-${node.id}`);
-          const betVal = document.getElementById(`g-bet-val-${node.id}`);
-          const winVal = document.getElementById(`g-win-val-${node.id}`);
-          const multVal = document.getElementById(`g-mult-val-${node.id}`);
-
-          const frameB64 = nodeSession.stream_frame_b64 || nodeSession.cv_thumbnail_b64;
-          if (gImg && frameB64) {
-            gImg.src = frameB64;
-            gImg.style.display = "block";
-            if (gPlaceholder) gPlaceholder.style.display = "none";
+          const modelSelect = document.getElementById(`model-select-${node.id}`);
+          if (modelSelect && nodeSession.model && modelSelect.value !== nodeSession.model) {
+            modelSelect.value = nodeSession.model;
           }
 
-          if (balVal && nodeSession.gambling_balance !== undefined) {
-            balVal.textContent = `$${Number(nodeSession.gambling_balance).toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
+          const latencyTag = document.getElementById(`face-latency-tag-${node.id}`);
+          const latency = nodeSession.latency_ms !== undefined ? nodeSession.latency_ms : nodeSession.emotion_latency_ms;
+          if (latencyTag && latency !== undefined && latency > 0) {
+            latencyTag.textContent = `${latency.toFixed(1)} ms`;
           }
-          if (betVal && nodeSession.gambling_bet !== undefined) {
-            betVal.textContent = `$${Number(nodeSession.gambling_bet).toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
-          }
-          if (winVal && nodeSession.gambling_win !== undefined) {
-            winVal.textContent = `$${Number(nodeSession.gambling_win).toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
-          }
-          if (multVal && nodeSession.gambling_multiplier !== undefined) {
-            multVal.textContent = nodeSession.gambling_multiplier ? `${nodeSession.gambling_multiplier.toFixed(1)}x` : "1.0x";
-          }
-          if (spinBadge && nodeSession.gambling_spin_state) {
-            spinBadge.textContent = nodeSession.gambling_spin_state;
-            if (nodeSession.gambling_spin_state === "WIN_CELEBRATION") {
-              spinBadge.style.color = "#f59e0b";
-              this.pulseWiresFromNode(node.id);
-            } else if (nodeSession.gambling_spin_state === "SPINNING") {
-              spinBadge.style.color = "#38bdf8";
-            } else {
-              spinBadge.style.color = "#94a3b8";
+
+          if (barsBox) {
+            const barColors = {
+              happiness: "#10b981",
+              joy: "#10b981",
+              surprise: "#38bdf8",
+              shock: "#38bdf8",
+              neutral: "#64748b",
+              contempt: "#f59e0b",
+              anger: "#ef4444",
+              rage: "#ef4444",
+              fear: "#a855f7",
+              disgust: "#84cc16",
+              sadness: "#6366f1",
+              despair: "#6366f1",
+            };
+
+            const isLogitsMode = (node.properties?.display_mode === "logits");
+            if (isLogitsMode && nodeSession.raw_logits && Object.keys(nodeSession.raw_logits).length > 0) {
+              const logitsObj = nodeSession.raw_logits;
+              const values = Object.values(logitsObj).map(v => Number(v) || 0.0);
+              const maxAbs = Math.max(1.0, ...values.map(Math.abs));
+
+              barsBox.innerHTML = Object.entries(logitsObj).map(([emo, rawVal]) => {
+                const val = Number(rawVal) || 0.0;
+                const isPos = val >= 0;
+                const pct = Math.min(50, Math.round((Math.abs(val) / maxAbs) * 50));
+                const leftPos = isPos ? 50 : (50 - pct);
+                const color = barColors[emo] || '#38bdf8';
+                const sign = val > 0 ? "+" : "";
+                return `
+                  <div class="cv-prob-row" style="margin:2px 0;">
+                    <span class="cv-prob-label" style="font-size:10px;">${emo}</span>
+                    <div class="cv-prob-track" style="position:relative; background:rgba(255,255,255,0.08); height:6px; border-radius:3px; overflow:hidden;">
+                      <div style="position:absolute; left:50%; top:0; bottom:0; width:1px; background:rgba(255,255,255,0.35); z-index:2;"></div>
+                      <div class="cv-prob-fill" style="position:absolute; left:${leftPos}%; width:${pct}%; height:100%; background:${color}; border-radius:2px; transition:all 0.2s ease;"></div>
+                    </div>
+                    <span class="cv-prob-pct" style="color:${color}; font-family:monospace; width:48px; font-size:10px; font-weight:700;">${sign}${val.toFixed(2)}</span>
+                  </div>
+                `;
+              }).join("");
+            } else if (nodeSession.emotion_distribution) {
+              const dist = nodeSession.emotion_distribution;
+              barsBox.innerHTML = Object.entries(dist).map(([emo, val]) => `
+                <div class="cv-prob-row">
+                  <span class="cv-prob-label">${emo}</span>
+                  <div class="cv-prob-track"><div class="cv-prob-fill" style="width: ${Math.round(val * 100)}%; background: ${barColors[emo] || '#38bdf8'};"></div></div>
+                  <span class="cv-prob-pct" style="color: ${barColors[emo] || '#38bdf8'};">${Math.round(val * 100)}%</span>
+                </div>
+              `).join("");
             }
           }
         } else if (node.type === "GamblingLedgerNode") {
@@ -2097,7 +3240,7 @@
       modal.classList.add("active");
 
       // Update frame preview from latest stream telemetry
-      const targetCh = (this.selectedChannel || "marlon").toLowerCase();
+      const targetCh = (this.selectedChannel || window.activeTab || "").toLowerCase();
       const frameEl = modal.querySelector("#calibrator-stream-frame");
       const placeEl = modal.querySelector("#calibrator-placeholder");
       const primarySession = window.latestTelemetry?.sessions?.[targetCh] || Object.values(window.latestTelemetry?.sessions || {})[0];
@@ -2117,39 +3260,13 @@
       const registeredRois = [];
 
       this.nodes.forEach(n => {
-        if (n.type === "FacecamEmotionNode") {
-          registeredRois.push({
-            nodeId: n.id,
-            paramKey: "face_roi",
-            label: "Streamer Facecam",
-            color: "#06b6d4",
-            roi: n.properties?.face_roi || { x: 0.02, y: 0.05, w: 0.22, h: 0.28 },
-          });
-        } else if (n.type === "GamblingOCRNode") {
-          const rois = n.properties?.rois || {
-            balance: { x: 0.05, y: 0.92, w: 0.18, h: 0.06 },
-            bet: { x: 0.42, y: 0.92, w: 0.16, h: 0.06 },
-            win: { x: 0.35, y: 0.50, w: 0.30, h: 0.14 },
-            reels: { x: 0.20, y: 0.15, w: 0.60, h: 0.70 },
-          };
-          const gColors = { balance: "#10b981", bet: "#38bdf8", win: "#f59e0b", reels: "#a855f7" };
-          Object.entries(rois).forEach(([k, r]) => {
-            registeredRois.push({
-              nodeId: n.id,
-              subKey: k,
-              paramKey: `roi_${k}`,
-              label: `Casino ${k.toUpperCase()}`,
-              color: gColors[k] || "#10b981",
-              roi: r,
-            });
-          });
-        } else if (n.type === "OCRVisionNode") {
+        if (n.type === "VideoCropNode") {
           registeredRois.push({
             nodeId: n.id,
             paramKey: "roi",
-            label: "Generic OCR",
-            color: "#10b981",
-            roi: n.properties?.roi || { x: 0.70, y: 0.85, w: 0.28, h: 0.12 },
+            label: n.title || "Video Cropper",
+            color: "#f43f5e",
+            roi: n.properties?.roi || { x: 0.02, y: 0.05, w: 0.22, h: 0.28 },
           });
         }
       });
@@ -2464,28 +3581,160 @@
       const palette = document.getElementById("node-spawn-palette");
       const list = palette?.querySelector(".spawn-list");
       const search = palette?.querySelector(".spawn-search");
+      const clearBtn = palette?.querySelector(".spawn-clear-btn");
+      const pills = palette?.querySelectorAll(".spawn-pill");
       if (!palette || !list) return;
+
+      this.currentPaletteFilterTag = "all";
+      this.pendingWireAutoConnect = null;
+
+      // Handle Filter Pills
+      pills?.forEach((pill) => {
+        pill.addEventListener("click", () => {
+          pills.forEach((p) => p.classList.remove("active"));
+          pill.classList.add("active");
+          this.currentPaletteFilterTag = pill.getAttribute("data-filter") || "all";
+          this.renderSpawnItems(search ? search.value : "");
+        });
+      });
+
+      // Clear search button
+      clearBtn?.addEventListener("click", () => {
+        if (search) search.value = "";
+        this.currentPaletteFilterTag = "all";
+        pills?.forEach((p) => p.classList.toggle("active", p.getAttribute("data-filter") === "all"));
+        this.renderSpawnItems("");
+        search?.focus();
+      });
 
       this.renderSpawnItems = (filterText = "") => {
         list.innerHTML = "";
-        const lower = filterText.toLowerCase();
+        const lower = filterText.toLowerCase().trim();
+        const activeTag = this.currentPaletteFilterTag || "all";
 
         this.nodeCatalog.forEach((item) => {
-          if (lower && !item.title.toLowerCase().includes(lower) && !item.desc.toLowerCase().includes(lower)) return;
+          // 1. Tag / Category Pill Filter
+          if (activeTag !== "all") {
+            if (activeTag.startsWith("in:")) {
+              const reqIn = activeTag.slice(3);
+              if (!item.inputs_accepted || !item.inputs_accepted.includes(reqIn)) return;
+            } else if (activeTag.startsWith("out:")) {
+              const reqOut = activeTag.slice(4);
+              if (!item.outputs_produced || !item.outputs_produced.includes(reqOut)) return;
+            } else if (activeTag.includes("stage:")) {
+              const stages = activeTag.split(",").map((s) => s.replace("stage:", "").trim());
+              if (!stages.includes(item.stage)) return;
+            }
+          }
+
+          // 2. Search Text Filter (supports keywords, tags, in:*, out:*, stage:*)
+          if (lower) {
+            if (lower.startsWith("in:")) {
+              const reqIn = lower.slice(3);
+              if (!item.inputs_accepted || !item.inputs_accepted.includes(reqIn)) return;
+            } else if (lower.startsWith("out:")) {
+              const reqOut = lower.slice(4);
+              if (!item.outputs_produced || !item.outputs_produced.includes(reqOut)) return;
+            } else if (lower.startsWith("stage:")) {
+              const reqStage = lower.slice(6);
+              if (item.stage !== reqStage) return;
+            } else {
+              const matchTitle = item.title.toLowerCase().includes(lower);
+              const matchDesc = item.desc.toLowerCase().includes(lower);
+              const matchType = item.type.toLowerCase().includes(lower);
+              const matchTags = (item.tags || []).some((t) => t.toLowerCase().includes(lower));
+              if (!matchTitle && !matchDesc && !matchType && !matchTags) return;
+            }
+          }
+
+          const getPortColor = (type) => {
+            if (this.portTypes && this.portTypes[type]?.color) {
+              return this.portTypes[type].color;
+            }
+            const fallbackColors = {
+              video: "#f43f5e",
+              audio: "#38bdf8",
+              chat: "#a855f7",
+              trigger: "#eab308",
+              scalar: "#10b981",
+              text: "#6366f1",
+              clip: "#f97316"
+            };
+            return fallbackColors[type] || "#94a3b8";
+          };
+
+          // Format I/O Dot Matrix Badges with explicit INS / OUTS sections
+          const inDots = (item.inputs_accepted && item.inputs_accepted.length > 0)
+            ? item.inputs_accepted.map((t) => {
+                const col = getPortColor(t);
+                const isMatch = lower && (lower.includes(t) || lower === `in:${t}`);
+                const matchCls = isMatch ? " io-match" : "";
+                return `<span class="io-group${matchCls}" title="Input: ${t}"><span class="io-dot" style="background:${col}; box-shadow:0 0 5px ${col}99;"></span><span class="io-label">${t}</span></span>`;
+              }).join(" ")
+            : `<span class="io-none">none</span>`;
+
+          const outDots = (item.outputs_produced && item.outputs_produced.length > 0)
+            ? item.outputs_produced.map((t) => {
+                const col = getPortColor(t);
+                const isMatch = lower && (lower.includes(t) || lower === `out:${t}`);
+                const matchCls = isMatch ? " io-match" : "";
+                return `<span class="io-group${matchCls}" title="Output: ${t}"><span class="io-dot" style="background:${col}; box-shadow:0 0 5px ${col}99;"></span><span class="io-label">${t}</span></span>`;
+              }).join(" ")
+            : `<span class="io-none">none</span>`;
 
           const row = document.createElement("div");
           row.setAttribute("class", "spawn-item");
-          row.innerHTML = `<span>${item.icon}</span> <span>${item.title}</span>`;
+          row.innerHTML = `
+            <div class="spawn-item-header">
+              <span style="font-size: 14px;">${item.icon}</span>
+              <span class="spawn-item-title">${item.title}</span>
+              <span class="spawn-item-stage">${item.stage}</span>
+            </div>
+            <div class="spawn-item-desc">${item.desc}</div>
+            <div class="spawn-item-io">
+              <div class="io-block io-block-in">
+                <span class="io-section-label">INS:</span>
+                <div class="io-port-chips">${inDots}</div>
+              </div>
+              <span class="io-arrow">➔</span>
+              <div class="io-block io-block-out">
+                <span class="io-section-label">OUTS:</span>
+                <div class="io-port-chips">${outDots}</div>
+              </div>
+            </div>
+          `;
+
           row.addEventListener("click", () => {
             const worldPos = this.screenToWorld(
-              parseInt(palette.style.left) + 280,
+              parseInt(palette.style.left) + 330,
               parseInt(palette.style.top) + 40
             );
-            this.addNode(item.type, Math.round(worldPos.x), Math.round(worldPos.y));
+            const newNode = this.addNode(item.type, Math.round(worldPos.x), Math.round(worldPos.y));
+
+            // Context-sensitive wire auto-connect
+            if (this.pendingWireAutoConnect && newNode) {
+              const { fromNodeId, fromPortId, fromType } = this.pendingWireAutoConnect;
+              const compatibleInput = (newNode.inputs || []).find((p) => p.type === fromType);
+              if (compatibleInput) {
+                this.createWire(`${fromNodeId}:${fromPortId}`, `${newNode.id}:${compatibleInput.id}`, fromType);
+              }
+              this.pendingWireAutoConnect = null;
+            }
+
             this.closeSpawnPalette();
           });
           list.appendChild(row);
         });
+
+        if (list.children.length === 0) {
+          const emptyRow = document.createElement("div");
+          emptyRow.style.padding = "20px 10px";
+          emptyRow.style.textAlign = "center";
+          emptyRow.style.color = "#64748b";
+          emptyRow.style.fontSize = "11px";
+          emptyRow.innerHTML = `No matching nodes found for "<strong>${filterText || activeTag}</strong>"`;
+          list.appendChild(emptyRow);
+        }
       };
 
       this.renderSpawnItems();
@@ -2495,12 +3744,30 @@
       });
     }
 
-    openSpawnPalette(clientX, clientY) {
+    openSpawnPalette(clientX, clientY, filterTag = "all", autoConnect = null) {
       const p = document.getElementById("node-spawn-palette");
       if (!p) return;
-      p.style.left = `${clientX}px`;
-      p.style.top = `${clientY}px`;
+
+      this.pendingWireAutoConnect = autoConnect;
+      this.currentPaletteFilterTag = filterTag || "all";
+
+      // Sync active filter pill UI
+      const pills = p.querySelectorAll(".spawn-pill");
+      pills.forEach((pill) => {
+        const pFilter = pill.getAttribute("data-filter");
+        pill.classList.toggle("active", pFilter === this.currentPaletteFilterTag);
+      });
+
+      // Keep within window bounds
+      const menuWidth = 330;
+      const menuHeight = 420;
+      const clampedX = Math.min(clientX, window.innerWidth - menuWidth - 20);
+      const clampedY = Math.min(clientY, window.innerHeight - menuHeight - 20);
+
+      p.style.left = `${Math.max(10, clampedX)}px`;
+      p.style.top = `${Math.max(10, clampedY)}px`;
       p.classList.add("active");
+
       const search = p.querySelector(".spawn-search");
       if (search) {
         search.value = "";
@@ -2512,6 +3779,7 @@
     }
 
     closeSpawnPalette() {
+      this.pendingWireAutoConnect = null;
       document.getElementById("node-spawn-palette")?.classList.remove("active");
     }
 
@@ -2528,6 +3796,13 @@
           { id: "audio", name: "Audio Stream", type: "audio" },
           { id: "chat", name: "Chat Stream", type: "chat" },
         ];
+      } else if (type === "VideoCropNode") {
+        inputs = [{ id: "video_in", name: "Full Video In", type: "video" }];
+        outputs = [{ id: "video_out", name: "Cropped Video", type: "video" }];
+      } else if (type === "ImageScaleNode" || type === "ResolutionModifierNode") {
+        type = "ImageScaleNode";
+        inputs = [{ id: "video_in", name: "Video In", type: "video" }];
+        outputs = [{ id: "video_out", name: "Scaled Video", type: "video" }];
       } else if (type === "AudioMonitorNode") {
         inputs = [{ id: "audio_in", name: "Audio In", type: "audio" }];
         outputs = [
@@ -2553,22 +3828,33 @@
           { id: "confidence", name: "Top Confidence", type: "scalar" },
           { id: "top_label", name: "Top Class", type: "text" },
         ];
-      } else if (type === "FacecamEmotionNode") {
+      } else if (type === "FacecamEmotionNode" || type === "EmotionFERPlusNode") {
         inputs = [{ id: "video_in", name: "Video In", type: "video" }];
         outputs = [
           { id: "tilt_trigger", name: "Tilt Trigger", type: "trigger" },
           { id: "euphoria_trigger", name: "Euphoria Trigger", type: "trigger" },
-          { id: "tilt_score", name: "Tilt Index", type: "scalar" },
-          { id: "valence", name: "Valence", type: "scalar" },
+          { id: "tilt_score", name: "Tilt Index", type: "scalar", min: 0.0, max: 100.0, step: 1.0, unit: "pts" },
+          { id: "euphoria_score", name: "Euphoria Index", type: "scalar", min: 0.0, max: 100.0, step: 1.0, unit: "pts" },
+          { id: "valence", name: "Valence", type: "scalar", min: -1.0, max: 1.0, step: 0.05, unit: "" },
+          { id: "arousal", name: "Arousal", type: "scalar", min: 0.0, max: 1.0, step: 0.05, unit: "" },
+          { id: "happy", name: "Happy Metric", type: "scalar", min: 0.0, max: 1.0, step: 0.01, unit: "%" },
+          { id: "angry", name: "Angry / Rage Metric", type: "scalar", min: 0.0, max: 1.0, step: 0.01, unit: "%" },
+          { id: "surprise", name: "Surprise Metric", type: "scalar", min: 0.0, max: 1.0, step: 0.01, unit: "%" },
+          { id: "sad", name: "Sadness Metric", type: "scalar", min: 0.0, max: 1.0, step: 0.01, unit: "%" },
+          { id: "fear", name: "Fear Metric", type: "scalar", min: 0.0, max: 1.0, step: 0.01, unit: "%" },
+          { id: "disgust", name: "Disgust Metric", type: "scalar", min: 0.0, max: 1.0, step: 0.01, unit: "%" },
+          { id: "neutral", name: "Neutral Metric", type: "scalar", min: 0.0, max: 1.0, step: 0.01, unit: "%" },
+          { id: "contempt", name: "Contempt Metric", type: "scalar", min: 0.0, max: 1.0, step: 0.01, unit: "%" },
         ];
-      } else if (type === "GamblingOCRNode") {
-        inputs = [{ id: "video_in", name: "Video In", type: "video" }];
+      } else if (type === "ThresholdGateNode" || type === "BasicGateNode" || type === "ValueGateNode") {
+        type = "ThresholdGateNode";
+        inputs = [
+          { id: "val_1", name: "Value In 1", type: "scalar" },
+        ];
         outputs = [
-          { id: "balance", name: "Balance", type: "scalar" },
-          { id: "bet", name: "Bet Size", type: "scalar" },
-          { id: "win", name: "Win Payout", type: "scalar" },
-          { id: "multiplier", name: "Multiplier", type: "scalar" },
-          { id: "ocr_data", name: "OCR Metrics", type: "scalar" },
+          { id: "trigger_out", name: "Gate Trigger Out", type: "trigger" },
+          { id: "passed_count", name: "Passed Inputs", type: "scalar", min: 0.0, max: 10.0, step: 1.0, unit: "" },
+          { id: "active", name: "Gate Active (0/1)", type: "scalar", min: 0.0, max: 1.0, step: 1.0, unit: "" },
         ];
       } else if (type === "GamblingLedgerNode") {
         inputs = [{ id: "ocr_in", name: "OCR Data In", type: "scalar" }];
@@ -2583,9 +3869,12 @@
         inputs = [
           { id: "trigger_1", name: "Trigger In 1", type: "trigger" },
           { id: "trigger_2", name: "Trigger In 2", type: "trigger" },
+          { id: "trigger_3", name: "Trigger In 3", type: "trigger" },
+          { id: "trigger_4", name: "Trigger In 4", type: "trigger" },
         ];
         outputs = [
           { id: "clip_trigger", name: "Clip Trigger Out", type: "trigger" },
+          { id: "score", name: "Evaluated Score", type: "scalar" },
         ];
       } else if (type === "SegmentSlicerNode") {
         inputs = [
@@ -2606,9 +3895,13 @@
         type: type,
         title: catalogItem ? catalogItem.title : type,
         category: catalogItem ? catalogItem.category : "stream",
+        stage: catalogItem ? catalogItem.stage : "heuristic",
+        inputs_accepted: catalogItem ? catalogItem.inputs_accepted : [],
+        outputs_produced: catalogItem ? catalogItem.outputs_produced : [],
+        tags: catalogItem ? catalogItem.tags : [],
         position: [x, y],
         properties: {
-          channel: type === "StreamSourceNode" ? (this.selectedChannel || window.activeTab || "marlon") : "auto",
+          channel: type === "StreamSourceNode" ? (this.selectedChannel || window.activeTab || "stream") : "auto",
         },
         inputs: inputs,
         outputs: outputs,
@@ -2620,6 +3913,38 @@
           folder_name: "Highlight Reels",
           date: new Date().toISOString().split("T")[0],
         };
+      } else if (type === "VideoCropNode") {
+        newNode.properties.roi = { x: 0.02, y: 0.05, w: 0.22, h: 0.28 };
+        newNode.properties.preset = "facecam_tl";
+      } else if (type === "ImageScaleNode") {
+        newNode.properties.scale_factor = 2.0;
+        newNode.properties.algorithm = "bicubic";
+        newNode.properties.sharpen_strength = 0.5;
+        newNode.properties.clahe_clip_limit = 2.0;
+        newNode.properties.denoise_strength = 0.0;
+        newNode.properties.target_w = 0;
+        newNode.properties.target_h = 0;
+      } else if (type === "FacecamEmotionNode" || type === "EmotionFERPlusNode") {
+        newNode.type = "FacecamEmotionNode";
+        newNode.properties.model = "ferplus";
+        newNode.properties.tilt_threshold = 65.0;
+        newNode.properties.euphoria_threshold = 75.0;
+      } else if (type === "ThresholdGateNode") {
+        newNode.properties.logic_mode = "ALL";
+        newNode.properties.min_count = 1;
+        newNode.properties.debounce_seconds = 10.0;
+        newNode.properties.show_sliders = true;
+        newNode.properties.rules = {
+          val_1: {
+            operator: ">=",
+            threshold: 0.5,
+            min: 0.0,
+            max: 1.0,
+            step: 0.01,
+            unit: "",
+            label: "Value In 1",
+          },
+        };
       }
 
       this.nodes.set(newId, newNode);
@@ -2629,9 +3954,11 @@
       }
       this.renderWires();
       this.syncGraphDebounced();
+      this.updateEmptyState();
       if (this.latestTelemetry) {
         this.applyTelemetry(this.latestTelemetry);
       }
+      return newNode;
     }
 
     autoLayout() {
@@ -2643,12 +3970,12 @@
         if (node.type === "StreamSourceNode") {
           node.position = [streamX, yCounters.col1];
           yCounters.col1 += 260;
-        } else if (["AudioMonitorNode", "ChatVelocityNode", "CVTransformerNode", "OCRVisionNode", "FacecamEmotionNode", "GamblingOCRNode", "ScreenSummarizerNode"].includes(node.type)) {
+        } else if (["VideoCropNode", "ImageScaleNode", "AudioMonitorNode", "ChatVelocityNode", "CVTransformerNode", "OCRVisionNode", "FacecamEmotionNode", "ScreenSummarizerNode"].includes(node.type)) {
           node.position = [col2X, yCounters.col2];
-          yCounters.col2 += (node.type === "CVTransformerNode" || node.type === "FacecamEmotionNode" || node.type === "GamblingOCRNode" ? 340 : 220);
-        } else if (node.type === "GamblingLedgerNode" || node.type === "GateEvaluatorNode") {
+          yCounters.col2 += (node.type === "CVTransformerNode" || node.type === "FacecamEmotionNode" || node.type === "VideoCropNode" || node.type === "ImageScaleNode" ? 340 : 220);
+        } else if (node.type === "GamblingLedgerNode" || node.type === "GateEvaluatorNode" || node.type === "ThresholdGateNode") {
           node.position = [col3X, yCounters.col3];
-          yCounters.col3 += 240;
+          yCounters.col3 += 260;
         } else if (node.type === "SegmentSlicerNode") {
           node.position = [col4X, yCounters.col4];
           yCounters.col4 += 200;
@@ -2684,13 +4011,13 @@
 
         (data.nodes || []).forEach((n) => {
           if (n.type === "StreamSourceNode") {
-            const ch = (n.properties?.channel || this.selectedChannel || window.activeTab || "marlon").replace(/^#/, "").toLowerCase();
+            const ch = (n.properties?.channel || this.selectedChannel || window.activeTab || "").replace(/^#/, "").toLowerCase();
             const plat = (n.properties?.platform || (ch.includes("kick") ? "kick" : "twitch")).toLowerCase();
             const platLabel = plat === "kick" ? "Kick" : "Twitch";
             n.properties = n.properties || {};
             n.properties.channel = ch;
             n.properties.platform = plat;
-            n.title = `${platLabel} Source: #${ch}`;
+            n.title = ch ? `${platLabel} Source: #${ch}` : `${platLabel} Source`;
           }
           this.nodes.set(n.id, n);
           this.renderNodeDOM(n);
@@ -2708,8 +4035,47 @@
         }
 
         this.updateTransform();
+        this.updateEmptyState();
       } catch (err) {
         console.warn("[NodeStudio] Failed to load graph from backend:", err);
+      }
+    }
+
+    updateEmptyState() {
+      if (!this.canvas) return;
+      let emptyEl = this.canvas.querySelector(".canvas-empty-state");
+      if (this.nodes.size === 0) {
+        if (!emptyEl) {
+          emptyEl = document.createElement("div");
+          emptyEl.className = "canvas-empty-state";
+          emptyEl.innerHTML = `
+            <div class="empty-state-card">
+              <div class="empty-state-icon">🕸️</div>
+              <h3 class="empty-state-title">Node Studio Canvas is Empty</h3>
+              <p class="empty-state-desc">No active heuristic pipeline. Add a live stream above, create nodes manually, or ask AI Copilot to build an autonomous pipeline.</p>
+              <div class="empty-state-actions">
+                <button class="empty-action-btn" id="btn-empty-add-node">➕ Add Node</button>
+                <button class="empty-action-btn primary" id="btn-empty-ai-copilot">🤖 Ask AI Copilot</button>
+              </div>
+            </div>
+          `;
+          this.canvas.appendChild(emptyEl);
+          emptyEl.querySelector("#btn-empty-add-node")?.addEventListener("click", () => {
+            this.openSpawnPalette(window.innerWidth / 2 - 130, 160);
+          });
+          emptyEl.querySelector("#btn-empty-ai-copilot")?.addEventListener("click", () => {
+            if (window.AIChat && typeof window.AIChat.openDrawer === "function") {
+              window.AIChat.openDrawer();
+            } else {
+              document.getElementById("btn-ai-chat-toggle")?.click();
+            }
+          });
+        }
+        emptyEl.style.display = "flex";
+      } else {
+        if (emptyEl) {
+          emptyEl.style.display = "none";
+        }
       }
     }
 

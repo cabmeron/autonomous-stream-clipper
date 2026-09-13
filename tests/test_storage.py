@@ -9,4 +9,7 @@ def test_storage_local_fallback(tmp_path):
 
     url = uploader.upload_clip(str(test_file), "clips/clip.mp4")
     assert url.startswith("/clips/")
-    assert os.path.exists(os.path.join(uploader.local_manager.storage_dir, "clip.mp4"))
+    uploaded_path = os.path.join(uploader.local_manager.storage_dir, "clip.mp4")
+    assert os.path.exists(uploaded_path)
+    if os.path.exists(uploaded_path):
+        os.remove(uploaded_path)

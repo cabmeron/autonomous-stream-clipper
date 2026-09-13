@@ -2,9 +2,19 @@ import pytest
 from services.orchestrator_dag import GraphDAGManager, COMPATIBLE_TYPES, PORT_TYPES
 
 
+def test_graph_starts_empty_by_default():
+    """Verify that GraphDAGManager starts with 0 nodes and 0 wires when no streams or template requested."""
+    mgr = GraphDAGManager()
+    graph = mgr.get_graph()
+    assert graph["nodes"] == []
+    assert graph["wires"] == []
+    assert len(mgr.nodes) == 0
+    assert len(mgr.wires) == 0
+
+
 def test_default_template_structure():
     """Verify that default graph template contains expected node catalog and wires."""
-    mgr = GraphDAGManager()
+    mgr = GraphDAGManager(load_template=True)
     graph = mgr.get_graph()
 
     assert "nodes" in graph
@@ -29,7 +39,7 @@ def test_default_template_structure():
 
 def test_type_compatibility_validation():
     """Verify that type compatibility prevents illegal wire connections."""
-    mgr = GraphDAGManager()
+    mgr = GraphDAGManager(load_template=True)
     nodes = {n["id"]: n for n in mgr.nodes.values()}
 
     # Valid wire: video -> video
@@ -83,7 +93,7 @@ def test_cycle_detection_kahns_algorithm():
 
 def test_node_param_hot_reload():
     """Verify that update_node_param updates properties immediately."""
-    mgr = GraphDAGManager()
+    mgr = GraphDAGManager(load_template=True)
     ok = mgr.update_node_param("node_audio", "jump_db_threshold", 16.5)
     assert ok is True
     assert mgr.nodes["node_audio"]["properties"]["jump_db_threshold"] == 16.5
@@ -91,7 +101,7 @@ def test_node_param_hot_reload():
 
 def test_sync_graph_payload():
     """Verify that sync_graph applies new layout."""
-    mgr = GraphDAGManager()
+    mgr = GraphDAGManager(load_template=True)
     payload = {
         "nodes": list(mgr.nodes.values()),
         "wires": mgr.wires,
@@ -103,7 +113,7 @@ def test_sync_graph_payload():
 
 def test_stream_node_channel_switch():
     """Verify that switching channel on StreamSourceNode updates title and properties."""
-    mgr = GraphDAGManager()
+    mgr = GraphDAGManager(load_template=True)
     ok = mgr.update_node_param("node_stream", "channel", "zarbex")
     assert ok is True
     assert mgr.nodes["node_stream"]["properties"]["channel"] == "zarbex"

@@ -163,7 +163,7 @@ def test_stream_session_explicit_platform_override():
 # ==========================================
 
 def test_dag_stream_source_kick_platform():
-    mgr = GraphDAGManager()
+    mgr = GraphDAGManager(load_template=True)
     stream_node = mgr.nodes.get("node_stream")
     assert stream_node is not None
 
