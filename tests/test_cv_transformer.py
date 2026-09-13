@@ -134,7 +134,8 @@ def test_gate_evaluator_cv_integration():
 
 def test_orchestrator_dag_cv_node():
     dag = GraphDAGManager()
-    
+    dag.add_stream_pipeline("teststream", auto_sequence=True)
+
     # Add a CVTransformerNode
     cv_node = {
         "id": "node_cv_test",
@@ -156,8 +157,8 @@ def test_orchestrator_dag_cv_node():
     dag.nodes["node_cv_test"] = cv_node
 
     # Wire video stream -> CV node -> gate
-    dag.wires.append({"id": "w_cv_in", "from": "node_stream:video", "to": "node_cv_test:video_in", "type": "video"})
-    dag.wires.append({"id": "w_cv_out", "from": "node_cv_test:spike_trigger", "to": "node_gate:trigger_1", "type": "trigger"})
+    dag.wires.append({"id": "w_cv_in", "from": "node_stream_teststream:video", "to": "node_cv_test:video_in", "type": "video"})
+    dag.wires.append({"id": "w_cv_out", "from": "node_cv_test:spike_trigger", "to": "node_gate_teststream:trigger_1", "type": "trigger"})
 
     is_valid, msg = dag.validate_dag(dag.nodes, dag.wires)
     assert is_valid, f"DAG validation failed: {msg}"

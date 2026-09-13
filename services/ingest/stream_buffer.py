@@ -9,10 +9,13 @@ import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from typing import List, Optional, Set
 from urllib.parse import urlparse
+
+IS_WINDOWS = platform.system() == "Windows"
 
 logger = logging.getLogger(__name__)
 
@@ -85,35 +88,45 @@ def detect_channel_and_platform(raw: str, default_platform: str = "twitch") -> t
 
 def get_default_shm_dir() -> str:
     """Select appropriate high-speed temporary buffer directory across platforms."""
-    if os.path.exists("/dev/shm") and os.access("/dev/shm", os.W_OK):
+    if not IS_WINDOWS and os.path.exists("/dev/shm") and os.access("/dev/shm", os.W_OK):
         return "/dev/shm/clipper"
-    return os.path.join("/tmp", "clipper_shm")
+    return os.path.join(tempfile.gettempdir(), "clipper_shm")
 
 
-def resolve_streamlink_binary() -> str:
-    """Locates the streamlink executable from the active Python virtualenv or system PATH."""
+def get_candidate_dir() -> str:
+    """Select appropriate cross-platform staging directory for candidate clip slices."""
+    return os.path.join(tempfile.gettempdir(), "clipper_candidates")
+
+
+def resolve_streamlink_binary() -> List[str]:
+    """Locates the streamlink executable from the active Python virtualenv or system PATH.
+
+    Returns an argv prefix (e.g. ["streamlink"] or [sys.executable, "-m", "streamlink"])
+    rather than a shell string, so callers never need shell=True or manual quoting.
+    """
+    exe_name = "streamlink.exe" if IS_WINDOWS else "streamlink"
+    venv_bin_name = "Scripts" if IS_WINDOWS else "bin"
+
     candidates = [
-        os.path.join(os.path.dirname(sys.executable), "streamlink"),
+        os.path.join(os.path.dirname(sys.executable), exe_name),
         shutil.which("streamlink"),
-        "/opt/homebrew/bin/streamlink",
-        "/usr/local/bin/streamlink",
-        os.path.join(os.getcwd(), "venv", "bin", "streamlink"),
-        os.path.join(os.getcwd(), ".venv", "bin", "streamlink"),
-        "/Users/user2/Documents/Projects/clipper/venv/bin/streamlink",
-        "/Users/user2/Documents/Projects/autonomous-stream-clipper/venv/bin/streamlink",
+        os.path.join(os.getcwd(), "venv", venv_bin_name, exe_name),
+        os.path.join(os.getcwd(), ".venv", venv_bin_name, exe_name),
     ]
+    if not IS_WINDOWS:
+        candidates.extend(["/opt/homebrew/bin/streamlink", "/usr/local/bin/streamlink"])
+
     for c in candidates:
         if c and os.path.exists(c) and os.access(c, os.X_OK):
-            return c
+            return [c]
 
-    for venv_py in (
-        os.path.join(os.getcwd(), "venv", "bin", "python3"),
-        "/Users/user2/Documents/Projects/clipper/venv/bin/python3",
-    ):
-        if os.path.exists(venv_py):
-            return f'"{venv_py}" -m streamlink'
+    venv_py = os.path.join(
+        os.getcwd(), "venv", venv_bin_name, "python.exe" if IS_WINDOWS else "python3"
+    )
+    if os.path.exists(venv_py):
+        return [venv_py, "-m", "streamlink"]
 
-    return f'"{sys.executable}" -m streamlink'
+    return [sys.executable, "-m", "streamlink"]
 
 
 class StreamRingBuffer:
@@ -171,18 +184,20 @@ class StreamRingBuffer:
         """Constructs environment with venv and standard binary directories on PATH."""
         env = dict(os.environ)
         venv_dir = os.path.dirname(sys.executable)
-        paths = [venv_dir, "/opt/homebrew/bin", "/usr/local/bin", env.get("PATH", "")]
-        env["PATH"] = ":".join(p for p in paths if p)
+        extra_paths = [venv_dir]
+        if not IS_WINDOWS:
+            extra_paths.extend(["/opt/homebrew/bin", "/usr/local/bin"])
+        extra_paths.append(env.get("PATH", ""))
+        env["PATH"] = os.pathsep.join(p for p in extra_paths if p)
         return env
 
     def _resolve_live_m3u8(self) -> Optional[str]:
         """Queries streamlink (and Kick API fallback) for the direct HLS playlist URL."""
-        streamlink_bin = resolve_streamlink_binary()
+        streamlink_argv = resolve_streamlink_binary()
         target_url = f"https://kick.com/{self.channel}" if self.platform == "kick" else f"twitch.tv/{self.channel}"
         try:
             res = subprocess.run(
-                f'{streamlink_bin} --stream-url "{target_url}" best',
-                shell=True,
+                [*streamlink_argv, "--stream-url", target_url, "best"],
                 capture_output=True,
                 text=True,
                 timeout=7.0,
@@ -227,7 +242,7 @@ class StreamRingBuffer:
             return
 
         try:
-            if platform.system() != "Windows":
+            if not IS_WINDOWS:
                 try:
                     pgid = os.getpgid(proc.pid)
                     if pgid != os.getpgrp() and pgid > 1:
@@ -242,7 +257,7 @@ class StreamRingBuffer:
         except Exception:
             # Escalate to SIGKILL for the entire process group if not terminated within timeout
             try:
-                if platform.system() != "Windows":
+                if not IS_WINDOWS:
                     try:
                         pgid = os.getpgid(proc.pid)
                         if pgid != os.getpgrp() and pgid > 1:
@@ -270,15 +285,15 @@ class StreamRingBuffer:
         if self.simulate:
             self.is_standby = False
             logger.info("[Buffer:%s] Running in SIMULATION mode (synthetic 1080p stream)...", self.channel)
-            cmd = (
-                f'ffmpeg -hide_banner -loglevel error '
-                f'-re -f lavfi -i "testsrc=size=1920x1080:rate=30" '
-                f'-f lavfi -i "sine=frequency=440:sample_rate=16000" '
-                f'-c:v libx264 -preset ultrafast -tune zerolatency -pix_fmt yuv420p '
-                f'-c:a aac -b:a 128k '
-                f'-f segment -segment_time {self.segment_time} '
-                f'-segment_wrap {self.segment_wrap} -y "{out_pattern}"'
-            )
+            cmd = [
+                "ffmpeg", "-hide_banner", "-loglevel", "error",
+                "-re", "-f", "lavfi", "-i", "testsrc=size=1920x1080:rate=30",
+                "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=16000",
+                "-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency", "-pix_fmt", "yuv420p",
+                "-c:a", "aac", "-b:a", "128k",
+                "-f", "segment", "-segment_time", str(self.segment_time),
+                "-segment_wrap", str(self.segment_wrap), "-y", out_pattern,
+            ]
         else:
             # Check if live stream is actively broadcasting
             live_url = self._resolve_live_m3u8()
@@ -286,13 +301,13 @@ class StreamRingBuffer:
                 self.is_standby = False
                 self.current_offline_interval = self.min_offline_check_interval
                 logger.info("[Buffer:%s] Live %s broadcast detected! Ingesting direct HLS stream...", self.channel, platform_name)
-                cmd = (
-                    f'ffmpeg -hide_banner -loglevel error '
-                    f'-reconnect 1 -reconnect_at_eof 1 -reconnect_streamed 1 -reconnect_delay_max 5 '
-                    f'-i "{live_url}" '
-                    f'-c copy -f segment -segment_time {self.segment_time} '
-                    f'-segment_wrap {self.segment_wrap} -y "{out_pattern}"'
-                )
+                cmd = [
+                    "ffmpeg", "-hide_banner", "-loglevel", "error",
+                    "-reconnect", "1", "-reconnect_at_eof", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5",
+                    "-i", live_url,
+                    "-c", "copy", "-f", "segment", "-segment_time", str(self.segment_time),
+                    "-segment_wrap", str(self.segment_wrap), "-y", out_pattern,
+                ]
             else:
                 self.is_standby = True
                 self.current_offline_interval = self.min_offline_check_interval
@@ -303,15 +318,15 @@ class StreamRingBuffer:
                     platform_name,
                     self.current_offline_interval,
                 )
-                cmd = (
-                    f'ffmpeg -hide_banner -loglevel error '
-                    f'-re -f lavfi -i "testsrc=size=1920x1080:rate=30" '
-                    f'-f lavfi -i "sine=frequency=220:sample_rate=16000" '
-                    f'-c:v libx264 -preset ultrafast -tune zerolatency -pix_fmt yuv420p '
-                    f'-c:a aac -b:a 64k '
-                    f'-f segment -segment_time {self.segment_time} '
-                    f'-segment_wrap {self.segment_wrap} -y "{out_pattern}"'
-                )
+                cmd = [
+                    "ffmpeg", "-hide_banner", "-loglevel", "error",
+                    "-re", "-f", "lavfi", "-i", "testsrc=size=1920x1080:rate=30",
+                    "-f", "lavfi", "-i", "sine=frequency=220:sample_rate=16000",
+                    "-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency", "-pix_fmt", "yuv420p",
+                    "-c:a", "aac", "-b:a", "64k",
+                    "-f", "segment", "-segment_time", str(self.segment_time),
+                    "-segment_wrap", str(self.segment_wrap), "-y", out_pattern,
+                ]
 
         logger.info(
             "[Buffer:%s] Initializing ingest -> %d segments (%ds total) at %s",
@@ -321,11 +336,16 @@ class StreamRingBuffer:
             self.shm_dir,
         )
 
+        # No shell=True: Popen execs ffmpeg directly (no intermediate shell process), so
+        # terminate()/kill() below always target ffmpeg itself on every platform.
+        popen_kwargs = {}
+        if not IS_WINDOWS:
+            popen_kwargs["preexec_fn"] = os.setsid
+
         self.process = subprocess.Popen(
             cmd,
-            shell=True,
             env=self._build_env(),
-            preexec_fn=os.setsid if platform.system() != "Windows" else None,
+            **popen_kwargs,
         )
 
     def _watchdog_loop(self):

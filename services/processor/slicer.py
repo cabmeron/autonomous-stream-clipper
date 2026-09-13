@@ -7,6 +7,8 @@ import tempfile
 import time
 from typing import List, Optional
 
+from services.ingest.stream_buffer import get_candidate_dir, get_default_shm_dir
+
 logger = logging.getLogger(__name__)
 
 
@@ -17,11 +19,12 @@ class SegmentSlicer:
     def extract_window(
         channel: str,
         duration_seconds: int = 60,
-        output_dir: str = "/tmp/clipper_candidates",
+        output_dir: Optional[str] = None,
         shm_base: Optional[str] = None,
     ) -> Optional[str]:
         channel_clean = channel.lower().lstrip("#")
-        base = shm_base or ("/dev/shm/clipper" if os.path.exists("/dev/shm") else "/tmp/clipper_shm")
+        output_dir = output_dir or get_candidate_dir()
+        base = shm_base or get_default_shm_dir()
         channel_dir = os.path.join(base, channel_clean)
 
         if not os.path.exists(channel_dir):

@@ -174,10 +174,7 @@
       gap: 4px;
     }
     .btn-add:hover { background: #7dd3fc; }
-    .auto-pipeline-toggle-btn {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
+    #preset-select {
       padding: 5px 9px;
       border-radius: 6px;
       border: 1px solid rgba(56, 189, 248, 0.4);
@@ -186,29 +183,12 @@
       font-size: 11px;
       font-weight: 700;
       cursor: pointer;
-      user-select: none;
-      transition: all 0.15s ease;
-      white-space: nowrap;
+      max-width: 170px;
     }
-    .auto-pipeline-toggle-btn:hover {
-      background: rgba(56, 189, 248, 0.22);
-      border-color: rgba(56, 189, 248, 0.7);
-    }
-    .auto-pipeline-toggle-btn input[type="checkbox"] {
-      cursor: pointer;
-      accent-color: #38bdf8;
-      width: 13px;
-      height: 13px;
-      margin: 0;
-    }
-    .auto-pipeline-toggle-btn.manual-mode {
-      border-color: rgba(148, 163, 184, 0.3);
-      background: rgba(148, 163, 184, 0.08);
-      color: #94a3b8;
-    }
-    .auto-pipeline-toggle-btn.manual-mode:hover {
-      background: rgba(148, 163, 184, 0.16);
-      border-color: rgba(148, 163, 184, 0.5);
+    #preset-select option {
+      background: #0f1420;
+      color: #e2e8f0;
+      font-weight: 500;
     }
 
     /* Empty state screen */
@@ -1809,6 +1789,20 @@
       max-width: 440px;
       line-height: 1.6;
     }
+    #graph-empty-state {
+      position: absolute;
+      inset: 0;
+      justify-content: center;
+      z-index: 5;
+      pointer-events: none;
+    }
+    /* .radar-empty-state sets display:flex with the same specificity as the browser's
+       default [hidden] rule, and author CSS always wins over the UA stylesheet - so the
+       hidden attribute alone never actually hid this element. An ID+attribute selector
+       outranks a class selector, so this reliably wins the cascade either way. */
+    #graph-empty-state[hidden] {
+      display: none;
+    }
 
   </style>
 </head>
@@ -1831,10 +1825,9 @@
         </div>
         <input id="channel-input" type="text" placeholder="Add channel or URL (e.g. xqc, kick.com/xqc, twitch.tv/zarbex)" onkeydown="if(event.key==='Enter') addStreamSession();" />
         <button class="btn-add" onclick="addStreamSession()">+ Add Stream</button>
-        <label id="auto-pipeline-toggle-label" class="auto-pipeline-toggle-btn" title="Toggle Auto-Build Clipping Nodes DAG vs. Manual Mode (Stream Source only)">
-          <input type="checkbox" id="chk-auto-sequence" checked onchange="onAutoPipelineToggleChanged(this.checked)" />
-          <span id="auto-pipeline-toggle-text">⚡ Auto-Build Sequence</span>
-        </label>
+        <select id="preset-select" title="Pick which heuristics pipeline a new stream starts with">
+          <option value="manual">🔧 Manual (Stream Only)</option>
+        </select>
         <button id="btn-discover-watchers" class="btn-discover-watchers" onclick="openWatchPartyModal()" title="Radar search for streamers watching or reacting to this channel">
           <span id="watchers-btn-icon">📡</span>
           <span id="watchers-btn-text">Watch-Party Radar</span>
@@ -2206,6 +2199,14 @@
     <div id="graph-canvas"></div>
     <svg id="graph-svg-layer"></svg>
     <div id="graph-nodes-layer"></div>
+    <div id="graph-empty-state" class="radar-empty-state" hidden>
+      <div style="font-size: 48px;">🕸️</div>
+      <div class="radar-empty-title">Node Studio is empty</div>
+      <div class="radar-empty-desc">
+        Add a stream from the top bar and pick a preset to build its pipeline automatically,
+        or choose "Manual (Stream Only)" to wire it up yourself with the Add Node button.
+      </div>
+    </div>
 
     <!-- Studio Floating Toolbar -->
     <div id="studio-toolbar">
@@ -2214,6 +2215,7 @@
       <button class="studio-btn" id="btn-calibrate-rois">🎯 Calibrate Stream ROIs</button>
       <button class="studio-btn" id="btn-auto-layout">📐 Auto-Layout</button>
       <button class="studio-btn" id="btn-sync-graph">💾 Sync DAG</button>
+      <button class="studio-btn" id="btn-save-template">📌 Save as Template</button>
       <button class="studio-btn" id="btn-reset-view">🎯 Center View</button>
     </div>
 
@@ -2263,32 +2265,62 @@
       }
     }
 
-    function onAutoPipelineToggleChanged(isChecked) {
-      const label = document.getElementById("auto-pipeline-toggle-label");
-      const text = document.getElementById("auto-pipeline-toggle-text");
-      if (isChecked) {
-        if (label) label.classList.remove("manual-mode");
-        if (text) text.textContent = "⚡ Auto-Build Sequence";
-      } else {
-        if (label) label.classList.add("manual-mode");
-        if (text) text.textContent = "🔧 Manual Nodes Only";
-      }
+    async function initPresetPicker() {
+      const sel = document.getElementById("preset-select");
+      if (!sel) return;
+      let saved = null;
+      try { saved = localStorage.getItem("clipper_preset"); } catch (e) {}
+
       try {
-        localStorage.setItem("clipper_auto_sequence", isChecked ? "true" : "false");
-      } catch (e) {}
+        const res = await fetch("/api/graph/presets");
+        const data = await res.json();
+        for (const p of (data.presets || [])) {
+          const opt = document.createElement("option");
+          opt.value = p.id;
+          opt.title = p.description || "";
+          opt.textContent = (p.built_in ? "⚡ " : "📌 ") + p.name;
+          sel.appendChild(opt);
+        }
+      } catch (e) {
+        console.warn("Failed to load presets:", e);
+      }
+
+      if (saved && Array.from(sel.options).some(o => o.value === saved)) {
+        sel.value = saved;
+      } else {
+        sel.value = "gambling_slots";
+      }
+
+      sel.addEventListener("change", () => {
+        try { localStorage.setItem("clipper_preset", sel.value); } catch (e) {}
+      });
     }
 
-    function initAutoPipelineToggle() {
+    async function refreshPresetOptions() {
+      // Reloads just the custom-template entries after saving a new one, keeping the
+      // current selection intact.
+      const sel = document.getElementById("preset-select");
+      if (!sel) return;
+      const current = sel.value;
       try {
-        const saved = localStorage.getItem("clipper_auto_sequence");
-        const chk = document.getElementById("chk-auto-sequence");
-        if (chk) {
-          if (saved !== null) {
-            chk.checked = (saved === "true");
-          }
-          onAutoPipelineToggleChanged(chk.checked);
+        const res = await fetch("/api/graph/presets");
+        const data = await res.json();
+        sel.innerHTML = "";
+        sel.appendChild(new Option("🔧 Manual (Stream Only)", "manual"));
+        for (const p of (data.presets || [])) {
+          const opt = document.createElement("option");
+          opt.value = p.id;
+          opt.title = p.description || "";
+          opt.textContent = (p.built_in ? "⚡ " : "📌 ") + p.name;
+          if (!p.built_in) opt.dataset.custom = "1";
+          sel.appendChild(opt);
         }
-      } catch (e) {}
+        if (Array.from(sel.options).some(o => o.value === current)) {
+          sel.value = current;
+        }
+      } catch (e) {
+        console.warn("Failed to refresh presets:", e);
+      }
     }
 
     // In-memory cache for fast UI updates
@@ -3081,14 +3113,16 @@
       // User gesture: enable unmuted audio
       streamMuted = false;
 
-      const chk = document.getElementById("chk-auto-sequence");
-      const autoSequence = chk ? chk.checked : true;
+      const presetSel = document.getElementById("preset-select");
+      const presetValue = presetSel ? presetSel.value : "gambling_slots";
+      const autoSequence = presetValue !== "manual";
+      const preset = autoSequence ? presetValue : null;
 
       try {
         const res = await fetch("/api/sessions", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ channel, platform, auto_sequence: autoSequence })
+          body: JSON.stringify({ channel, platform, auto_sequence: autoSequence, preset })
         });
         const data = await res.json();
         if (res.ok) {
@@ -3792,12 +3826,14 @@
       try {
         const candObj = lastDiscoveredCandidates.find(c => c.login === channel);
         const isSim = Boolean(candObj && candObj.is_simulation);
-        const chk = document.getElementById("chk-auto-sequence");
-        const autoSequence = chk ? chk.checked : true;
+        const presetSel = document.getElementById("preset-select");
+        const presetValue = presetSel ? presetSel.value : "gambling_slots";
+        const autoSequence = presetValue !== "manual";
+        const preset = autoSequence ? presetValue : null;
         const res = await fetch("/api/sessions", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ channel, simulate: isSim, auto_sequence: autoSequence })
+          body: JSON.stringify({ channel, simulate: isSim, auto_sequence: autoSequence, preset })
         });
         const data = await res.json();
         if (res.ok) {
@@ -3864,7 +3900,7 @@
 
     fetchRecentClips();
     updateAudioControlsUI();
-    initAutoPipelineToggle();
+    initPresetPicker();
 
     function switchViewMode(mode) {
       const studioContainer = document.getElementById("graph-studio-container");

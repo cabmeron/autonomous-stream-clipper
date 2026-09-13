@@ -4,6 +4,7 @@ import io
 import json
 import logging
 import os
+import platform
 import signal
 import sys
 import threading
@@ -13,7 +14,12 @@ from typing import Dict, List, Optional, Set
 from dotenv import load_dotenv
 from aiohttp import web
 
-from services.ingest.stream_buffer import StreamRingBuffer, clean_channel_name, detect_channel_and_platform
+from services.ingest.stream_buffer import (
+    StreamRingBuffer,
+    clean_channel_name,
+    detect_channel_and_platform,
+    get_candidate_dir,
+)
 from services.ingest.twitch_irc import TwitchChatVelocityEngine
 from services.ingest.kick_chat import KickChatVelocityEngine
 from services.heuristics.audio_monitor import AudioDecibelMonitor
@@ -48,6 +54,7 @@ logger = logging.getLogger("orchestrator")
 
 DEBOUNCE_SEC = float(os.getenv("HEURISTIC_DEBOUNCE_SECONDS", "30"))
 POST_DELAY_SEC = float(os.getenv("POST_EVENT_DELAY_SECONDS", "10"))
+ARM_DELAY_SEC = float(os.getenv("STREAM_ARM_DELAY_SECONDS", "20"))
 HTTP_PORT = int(os.getenv("HTTP_PORT", "8000"))
 STORAGE_DIR = os.getenv("STORAGE_DIR", "./storage/clips")
 ENABLE_OCR = os.getenv("OCR_ENABLED", "true").lower() == "true"
@@ -56,6 +63,9 @@ ENABLE_BURN_IN_SUBS = os.getenv("ENABLE_BURN_IN_SUBS", "false").lower() == "true
 DESCRIPTOR_INTERVAL_SEC = int(os.getenv("CHAT_DESCRIPTOR_INTERVAL_SECONDS", "60"))
 LOCAL_LLM_URL = os.getenv("LOCAL_LLM_URL", "http://localhost:11434/v1")
 LOCAL_LLM_MODEL = os.getenv("LOCAL_LLM_MODEL", "llama3.2:1b")
+
+# SO_REUSEPORT is POSIX-only; Windows' socket module has no support for it.
+SUPPORTS_REUSE_PORT = platform.system() != "Windows"
 
 
 class StreamSession:
@@ -136,6 +146,7 @@ class StreamSession:
             on_trigger_activated=self._on_trigger_activated,
             debounce_seconds=DEBOUNCE_SEC,
             post_event_delay_seconds=POST_DELAY_SEC,
+            arm_delay_seconds=ARM_DELAY_SEC,
         )
 
         # 6. Local Chat State Descriptor Service (Disabled by default, superseded by on-demand Screen State Summarizer)
@@ -195,6 +206,7 @@ class StreamSession:
         logger.info("[Session:%s] Starting stream buffer and chat listener...", self.channel)
         self.loop = loop
         self.gate_evaluator.loop = loop
+        self.gate_evaluator.arm()
         self.buffer.start()
         self.chat_task = loop.create_task(self.chat_engine.listen())
 
@@ -398,6 +410,7 @@ class StreamSession:
             "gambling_multiplier": self.extra_telemetry.get("gambling_multiplier", 0.0),
             "gambling_spin_state": self.extra_telemetry.get("gambling_spin_state", "IDLE"),
             "gambling_ledger": self.gambling_ledger.get_summary() if getattr(self, "gambling_ledger", None) else {},
+            "gate_arm_status": self.gate_evaluator.get_arm_status() if getattr(self, "gate_evaluator", None) else {"is_arming": False, "arm_remaining_seconds": 0.0},
             "buffered_messages": calc["buffered_messages"],
             "total_messages": calc.get("total_messages", 0),
             "buffered_segments": self.buffer.get_segment_count() if self.buffer else 0,
@@ -615,6 +628,7 @@ class StreamClipperOrchestrator:
         simulate: bool = False,
         platform: Optional[str] = None,
         auto_sequence: bool = True,
+        preset: Optional[str] = None,
     ) -> dict:
         """Adds a new channel session and begins ingestion."""
         clean, detected_plat = detect_channel_and_platform(channel, default_platform=platform or "twitch")
@@ -639,7 +653,7 @@ class StreamClipperOrchestrator:
         if hasattr(self, "graph_manager") and self.graph_manager:
             try:
                 self.graph_manager.add_stream_pipeline(
-                    clean, platform=plat, auto_sequence=auto_sequence, simulate=simulate
+                    clean, platform=plat, auto_sequence=auto_sequence, simulate=simulate, preset=preset
                 )
             except Exception as ge:
                 logger.warning("[Orchestrator] Failed to update graph for #%s: %s", clean, ge)
@@ -998,8 +1012,9 @@ class StreamClipperOrchestrator:
 
             # Step 5: Pure raw video cut (100% clean, no text, no overlays, no cropping)
             self.update_job_step(job_id, "render", "running", 80, log_msg="Cutting full-sized raw video using hardware acceleration...")
-            out_video = f"/tmp/clipper_candidates/clip_{active_channel}_{timestamp}.mp4"
-            out_thumb = f"/tmp/clipper_candidates/thumb_{active_channel}_{timestamp}.jpg"
+            candidates_dir = get_candidate_dir()
+            out_video = os.path.join(candidates_dir, f"clip_{active_channel}_{timestamp}.mp4")
+            out_thumb = os.path.join(candidates_dir, f"thumb_{active_channel}_{timestamp}.jpg")
 
             rendered = HardwareRenderEngine.render_clip(
                 source_path=candidate_path,
@@ -1136,8 +1151,9 @@ class StreamClipperOrchestrator:
                 platform = data.get("platform")
                 simulate = bool(data.get("simulate", False))
                 auto_sequence = bool(data.get("auto_sequence", True))
+                preset = data.get("preset")
                 res = await self.add_session(
-                    channel, simulate=simulate, platform=platform, auto_sequence=auto_sequence
+                    channel, simulate=simulate, platform=platform, auto_sequence=auto_sequence, preset=preset
                 )
                 return web.json_response(res)
             except ValueError as ve:
@@ -1634,17 +1650,44 @@ class StreamClipperOrchestrator:
                 platform = data.get("platform", "twitch")
                 auto_sequence = bool(data.get("auto_sequence", True))
                 simulate = bool(data.get("simulate", False))
+                preset = data.get("preset")
                 res = self.graph_manager.add_stream_pipeline(
-                    channel, platform=platform, auto_sequence=auto_sequence, simulate=simulate
+                    channel, platform=platform, auto_sequence=auto_sequence, simulate=simulate, preset=preset
                 )
                 return web.json_response(res)
             except Exception as e:
                 return web.json_response({"error": str(e)}, status=400)
 
+        # Node Studio Presets & Custom Templates
+        async def get_graph_presets_handler(request):
+            return web.json_response({"presets": self.graph_manager.list_presets()})
+
+        async def post_graph_template_handler(request):
+            try:
+                data = await request.json()
+                name = str(data.get("name", "")).strip()
+                channel = data.get("channel", "")
+                if not name or not channel:
+                    return web.json_response({"error": "name and channel are required"}, status=400)
+                result = self.graph_manager.save_custom_template(name, channel)
+                if not result:
+                    return web.json_response({"error": f"No active pipeline found for #{channel}"}, status=404)
+                return web.json_response({"success": True, "template": result})
+            except Exception as e:
+                return web.json_response({"error": str(e)}, status=400)
+
+        async def delete_graph_template_handler(request):
+            template_id = request.match_info["id"]
+            success = self.graph_manager.delete_custom_template(template_id)
+            return web.json_response({"success": success})
+
         app.router.add_get("/api/graph", get_graph_handler)
         app.router.add_post("/api/graph/sync", post_graph_sync_handler)
         app.router.add_post("/api/graph/nodes/{id}/param", post_graph_node_param_handler)
         app.router.add_post("/api/graph/stream-pipeline", post_graph_stream_pipeline_handler)
+        app.router.add_get("/api/graph/presets", get_graph_presets_handler)
+        app.router.add_post("/api/graph/templates", post_graph_template_handler)
+        app.router.add_delete("/api/graph/templates/{id}", delete_graph_template_handler)
 
         # Static mounts
         app.router.add_static("/clips", clips_dir)
@@ -1653,7 +1696,10 @@ class StreamClipperOrchestrator:
 
         self.http_runner = web.AppRunner(app)
         await self.http_runner.setup()
-        site = web.TCPSite(self.http_runner, "0.0.0.0", HTTP_PORT, reuse_address=True, reuse_port=True)
+        site = web.TCPSite(
+            self.http_runner, "0.0.0.0", HTTP_PORT,
+            reuse_address=True, reuse_port=SUPPORTS_REUSE_PORT,
+        )
         await site.start()
         logger.info("[LocalServer] Async web server active at http://localhost:%d", HTTP_PORT)
 
@@ -1688,7 +1734,15 @@ class StreamClipperOrchestrator:
             try:
                 self.loop.add_signal_handler(sig, lambda: asyncio.create_task(self.shutdown()))
             except NotImplementedError:
-                pass
+                # Windows' ProactorEventLoop has no add_signal_handler support; fall back to
+                # the classic signal.signal() API, dispatched back onto the loop thread-safely.
+                try:
+                    signal.signal(
+                        sig,
+                        lambda *_: self.loop.call_soon_threadsafe(lambda: asyncio.create_task(self.shutdown())),
+                    )
+                except (ValueError, OSError):
+                    pass
 
         try:
             import websockets
@@ -1698,7 +1752,7 @@ class StreamClipperOrchestrator:
                 "0.0.0.0",
                 telemetry_server.PORT,
                 reuse_address=True,
-                reuse_port=True,
+                reuse_port=SUPPORTS_REUSE_PORT,
             )
             logger.info("[Telemetry] WebSocket active on ws://0.0.0.0:%d", telemetry_server.PORT)
 

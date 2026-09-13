@@ -16,6 +16,7 @@ class GateEvaluator:
         on_trigger_activated: Optional[Callable[[dict], None]] = None,
         debounce_seconds: float = 30.0,
         post_event_delay_seconds: float = 10.0,
+        arm_delay_seconds: float = 0.0,
         event_loop: Optional[asyncio.AbstractEventLoop] = None,
     ):
         self.dispatch = on_trigger_dispatch
@@ -24,6 +25,23 @@ class GateEvaluator:
         self.post_event_delay = post_event_delay_seconds
         self.last_trigger_time = 0.0
         self.loop = event_loop
+
+        # Grace period after a stream starts monitoring: heuristic baselines (chat
+        # velocity, audio RMS, etc.) need a moment to stabilize, so triggers are
+        # suppressed for arm_delay_seconds after arm() is called.
+        self.arm_delay_seconds = arm_delay_seconds
+        self.armed_at: Optional[float] = None
+
+    def arm(self):
+        """Marks the start of the grace period; call when the session begins monitoring."""
+        self.armed_at = time.time()
+
+    def get_arm_status(self) -> dict:
+        """Returns whether this evaluator is still within its post-start grace period."""
+        if self.armed_at is None:
+            return {"is_arming": False, "arm_remaining_seconds": 0.0}
+        remaining = max(0.0, self.arm_delay_seconds - (time.time() - self.armed_at))
+        return {"is_arming": remaining > 0.0, "arm_remaining_seconds": round(remaining, 1)}
 
     def calculate_score(
         self,
@@ -88,6 +106,15 @@ class GateEvaluator:
     ):
         """Evaluates incoming signal, enforces 90s debounce cooldown, and schedules post-delay dispatch."""
         now = time.time()
+
+        if self.armed_at is not None and (now - self.armed_at) < self.arm_delay_seconds:
+            logger.debug(
+                "[Gate] Suppressed trigger from %s (still arming: %.1fs remaining)",
+                source,
+                self.arm_delay_seconds - (now - self.armed_at),
+            )
+            return
+
         time_since_last = now - self.last_trigger_time
 
         if time_since_last < self.debounce_seconds:

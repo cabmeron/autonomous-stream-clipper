@@ -818,10 +818,18 @@
         (n) => n.type === "StreamSourceNode"
       );
 
-      // Only update StreamSourceNode if there's exactly 1 stream source node.
-      // If multiple stream source nodes exist, each keeps its own channel!
-      if (streamSourceNodes.length === 1) {
-        const node = streamSourceNodes[0];
+      // Only repurpose the lone StreamSourceNode if it's still the untouched
+      // bootstrap placeholder ("marlon"/empty) or already represents this
+      // channel. Tab switches fire on this same code path right after adding
+      // a new stream, using this client's not-yet-refreshed node cache - if we
+      // renamed any already-bound node here, it would silently steal an
+      // existing stream's node out from under it (leaving that node and the
+      // new stream's own freshly-created pipeline both pointing at the new
+      // channel: two full pipelines for one active stream). See handleStreamAdded().
+      const soleNode = streamSourceNodes.length === 1 ? streamSourceNodes[0] : null;
+      const soleNodeCh = soleNode ? (soleNode.properties?.channel || "").replace(/^#/, "").toLowerCase() : null;
+      if (soleNode && (!soleNodeCh || soleNodeCh === "marlon" || soleNodeCh === cleanCh)) {
+        const node = soleNode;
         node.properties = node.properties || {};
         node.properties.channel = cleanCh;
         const plat = (node.properties.platform || "twitch").toLowerCase();
@@ -1947,10 +1955,14 @@
           const scoreEl = document.getElementById(`gate-score-${node.id}`);
           const statusEl = document.getElementById(`gate-status-${node.id}`);
           const score = nodeSession.spike_ratio > 3.0 || nodeSession.audio_spike ? 8 : 1;
+          const armStatus = nodeSession.gate_arm_status;
 
           if (scoreEl) scoreEl.textContent = score;
           if (statusEl) {
-            if (score >= 4) {
+            if (armStatus && armStatus.is_arming) {
+              statusEl.textContent = `ARMING ${Math.ceil(armStatus.arm_remaining_seconds)}s`;
+              statusEl.classList.remove("active");
+            } else if (score >= 4) {
               statusEl.textContent = "TRIGGER READY";
               statusEl.classList.add("active");
               this.pulseWiresFromNode(node.id);
@@ -2448,6 +2460,10 @@
         this.syncGraph();
       });
 
+      document.getElementById("btn-save-template")?.addEventListener("click", () => {
+        this.promptSaveTemplate();
+      });
+
       document.getElementById("btn-auto-layout")?.addEventListener("click", () => {
         this.autoLayout();
       });
@@ -2682,9 +2698,12 @@
         this.wires = data.wires || [];
         this.portTypes = data.port_types || {};
 
+        const emptyStateEl = document.getElementById("graph-empty-state");
+        if (emptyStateEl) emptyStateEl.hidden = (data.nodes || []).length > 0;
+
         (data.nodes || []).forEach((n) => {
           if (n.type === "StreamSourceNode") {
-            const ch = (n.properties?.channel || this.selectedChannel || window.activeTab || "marlon").replace(/^#/, "").toLowerCase();
+            const ch = (n.properties?.channel || this.selectedChannel || window.activeTab || "channel").replace(/^#/, "").toLowerCase();
             const plat = (n.properties?.platform || (ch.includes("kick") ? "kick" : "twitch")).toLowerCase();
             const platLabel = plat === "kick" ? "Kick" : "Twitch";
             n.properties = n.properties || {};
@@ -2710,6 +2729,40 @@
         this.updateTransform();
       } catch (err) {
         console.warn("[NodeStudio] Failed to load graph from backend:", err);
+      }
+    }
+
+    async promptSaveTemplate() {
+      const streamNodes = Array.from(this.nodes.values()).filter((n) => n.type === "StreamSourceNode");
+      if (streamNodes.length === 0) {
+        this.showToast("Add a stream first - there's no pipeline to save yet.", true);
+        return;
+      }
+      const target =
+        streamNodes.find((n) => (n.properties?.channel || "").toLowerCase() === this.selectedChannel) ||
+        streamNodes[0];
+      const channel = target.properties?.channel;
+
+      const name = window.prompt(`Save #${channel}'s current pipeline as a template. Name it:`, "");
+      if (!name || !name.trim()) return;
+
+      try {
+        const res = await fetch("/api/graph/templates", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: name.trim(), channel }),
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+          this.showToast(`📌 Saved template "${name.trim()}"`);
+          if (typeof window.refreshPresetOptions === "function") {
+            window.refreshPresetOptions();
+          }
+        } else {
+          this.showToast(data.error || "Failed to save template", true);
+        }
+      } catch (err) {
+        this.showToast("Network error saving template: " + err, true);
       }
     }
 

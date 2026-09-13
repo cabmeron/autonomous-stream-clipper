@@ -135,9 +135,18 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             width=3,
         )
 
-        try:
-            font = ImageFont.truetype("/System/Library/Fonts/Supplemental/Arial Bold.ttf", 32)
-        except Exception:
+        font = None
+        for font_path in (
+            "/System/Library/Fonts/Supplemental/Arial Bold.ttf",  # macOS
+            "C:\\Windows\\Fonts\\arialbd.ttf",  # Windows
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",  # Linux
+        ):
+            try:
+                font = ImageFont.truetype(font_path, 32)
+                break
+            except Exception:
+                continue
+        if font is None:
             font = ImageFont.load_default()
 
         bbox = draw.textbbox((0, 0), text, font=font)

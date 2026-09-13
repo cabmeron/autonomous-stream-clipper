@@ -33,6 +33,7 @@ Thumbs.db
 /storage/clips/thumb_*.jpg
 /storage/clips/clip.mp4
 /storage/clips/test_*.ts
+storage/*.db
 storage/*.db-wal
 storage/*.db-shm
 *.db-wal
