@@ -17,12 +17,23 @@ All media and metadata are saved locally to an embedded SQLite database and loca
 
 ## Installation
 
-Clone the repository and set up a Python virtual environment. Install all required dependencies using pip install -r requirements.txt. Ensure FFmpeg is installed on your system.
+Clone the repository and set up a Python virtual environment. Install all required dependencies using pip install -r requirements.txt. Ensure FFmpeg (and `ffprobe`) is installed and on your `PATH`.
+
+**macOS / Linux:**
 
 ```bash
 python3.12 -m venv venv
 ./venv/bin/pip install -r requirements.txt
 ```
+
+**Windows (PowerShell):**
+
+```powershell
+py -3.12 -m venv venv
+.\venv\Scripts\pip install -r requirements.txt
+```
+
+Install FFmpeg via `winget install Gyan.FFmpeg` (or from ffmpeg.org) and make sure `ffmpeg.exe`/`ffprobe.exe` are on your `PATH`. `paddleocr` is Linux-only (see `requirements.txt`); on Windows the app automatically falls back to `pytesseract`, which additionally requires the [Tesseract-OCR](https://github.com/UB-Mannheim/tesseract/wiki) binary to be installed and on `PATH`.
 
 ## Running the App
 
@@ -30,6 +41,12 @@ Start the application by running orchestrator.py. Open your web browser and navi
 
 ```bash
 ./venv/bin/python orchestrator.py
+```
+
+On Windows:
+
+```powershell
+.\venv\Scripts\python orchestrator.py
 ```
 
 ## Multi-Session Web UI Usage
@@ -42,4 +59,10 @@ Run the automated test suite with ./venv/bin/pytest tests/ -v. The test suite ve
 
 ```bash
 ./venv/bin/pytest tests/ -v
+```
+
+On Windows:
+
+```powershell
+.\venv\Scripts\pytest tests/ -v
 ```

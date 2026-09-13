@@ -4,6 +4,7 @@ import io
 import json
 import logging
 import os
+import platform
 import signal
 import sys
 import threading
@@ -13,7 +14,12 @@ from typing import Dict, List, Optional, Set
 from dotenv import load_dotenv
 from aiohttp import web
 
-from services.ingest.stream_buffer import StreamRingBuffer, clean_channel_name, detect_channel_and_platform
+from services.ingest.stream_buffer import (
+    StreamRingBuffer,
+    clean_channel_name,
+    detect_channel_and_platform,
+    get_candidate_dir,
+)
 from services.ingest.twitch_irc import TwitchChatVelocityEngine
 from services.ingest.kick_chat import KickChatVelocityEngine
 from services.heuristics.audio_monitor import AudioDecibelMonitor
@@ -56,6 +62,9 @@ ENABLE_BURN_IN_SUBS = os.getenv("ENABLE_BURN_IN_SUBS", "false").lower() == "true
 DESCRIPTOR_INTERVAL_SEC = int(os.getenv("CHAT_DESCRIPTOR_INTERVAL_SECONDS", "60"))
 LOCAL_LLM_URL = os.getenv("LOCAL_LLM_URL", "http://localhost:11434/v1")
 LOCAL_LLM_MODEL = os.getenv("LOCAL_LLM_MODEL", "llama3.2:1b")
+
+# SO_REUSEPORT is POSIX-only; Windows' socket module has no support for it.
+SUPPORTS_REUSE_PORT = platform.system() != "Windows"
 
 
 class StreamSession:
@@ -998,8 +1007,9 @@ class StreamClipperOrchestrator:
 
             # Step 5: Pure raw video cut (100% clean, no text, no overlays, no cropping)
             self.update_job_step(job_id, "render", "running", 80, log_msg="Cutting full-sized raw video using hardware acceleration...")
-            out_video = f"/tmp/clipper_candidates/clip_{active_channel}_{timestamp}.mp4"
-            out_thumb = f"/tmp/clipper_candidates/thumb_{active_channel}_{timestamp}.jpg"
+            candidates_dir = get_candidate_dir()
+            out_video = os.path.join(candidates_dir, f"clip_{active_channel}_{timestamp}.mp4")
+            out_thumb = os.path.join(candidates_dir, f"thumb_{active_channel}_{timestamp}.jpg")
 
             rendered = HardwareRenderEngine.render_clip(
                 source_path=candidate_path,
@@ -1653,7 +1663,10 @@ class StreamClipperOrchestrator:
 
         self.http_runner = web.AppRunner(app)
         await self.http_runner.setup()
-        site = web.TCPSite(self.http_runner, "0.0.0.0", HTTP_PORT, reuse_address=True, reuse_port=True)
+        site = web.TCPSite(
+            self.http_runner, "0.0.0.0", HTTP_PORT,
+            reuse_address=True, reuse_port=SUPPORTS_REUSE_PORT,
+        )
         await site.start()
         logger.info("[LocalServer] Async web server active at http://localhost:%d", HTTP_PORT)
 
@@ -1688,7 +1701,15 @@ class StreamClipperOrchestrator:
             try:
                 self.loop.add_signal_handler(sig, lambda: asyncio.create_task(self.shutdown()))
             except NotImplementedError:
-                pass
+                # Windows' ProactorEventLoop has no add_signal_handler support; fall back to
+                # the classic signal.signal() API, dispatched back onto the loop thread-safely.
+                try:
+                    signal.signal(
+                        sig,
+                        lambda *_: self.loop.call_soon_threadsafe(lambda: asyncio.create_task(self.shutdown())),
+                    )
+                except (ValueError, OSError):
+                    pass
 
         try:
             import websockets
@@ -1698,7 +1719,7 @@ class StreamClipperOrchestrator:
                 "0.0.0.0",
                 telemetry_server.PORT,
                 reuse_address=True,
-                reuse_port=True,
+                reuse_port=SUPPORTS_REUSE_PORT,
             )
             logger.info("[Telemetry] WebSocket active on ws://0.0.0.0:%d", telemetry_server.PORT)
 

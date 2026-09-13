@@ -1,5 +1,6 @@
 import asyncio
 import os
+import platform
 import signal
 import subprocess
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -12,9 +13,16 @@ from services.storage.db import DatabaseRepository
 import telemetry_server
 from orchestrator import StreamClipperOrchestrator
 
+# os.getpgid/os.getpgrp/os.killpg don't exist on Windows; the process-group kill path
+# they exercise is POSIX-only (see StreamRingBuffer._terminate_current_process).
+requires_posix = pytest.mark.skipif(
+    platform.system() == "Windows", reason="POSIX process-group signaling only"
+)
+
 
 class TestShutdownCleanup:
 
+    @requires_posix
     @pytest.mark.asyncio
     async def test_stream_ring_buffer_process_group_kill(self):
         """Verifies _terminate_current_process properly issues SIGTERM to process group."""
@@ -33,6 +41,7 @@ class TestShutdownCleanup:
             mock_proc.wait.assert_called_once_with(timeout=2.0)
             assert buf.process is None
 
+    @requires_posix
     @pytest.mark.asyncio
     async def test_stream_ring_buffer_sigkill_escalation(self):
         """Verifies _terminate_current_process escalates to SIGKILL if SIGTERM times out."""

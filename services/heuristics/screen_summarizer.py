@@ -9,17 +9,12 @@ import time
 import uuid
 from typing import List, Optional
 
+from services.ingest.stream_buffer import get_default_shm_dir
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
 DEFAULT_TIMEOUT_SECONDS = float(os.getenv("SCREEN_SUMMARIZER_TIMEOUT_SECONDS", "30.0"))
-
-
-def get_default_shm_dir() -> str:
-    """Select appropriate temporary buffer directory across platforms."""
-    if os.path.exists("/dev/shm") and os.access("/dev/shm", os.W_OK):
-        return "/dev/shm/clipper"
-    return os.path.join("/tmp", "clipper_shm")
 
 
 class ScreenStateSummarizerService:
