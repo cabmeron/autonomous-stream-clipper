@@ -504,16 +504,48 @@ class GraphDAGManager:
         return self.get_graph()
 
     def remove_stream_pipeline(self, channel: str) -> dict:
-        """Removes a stream node and attached wires when a session is closed."""
+        """Removes a stream node and every worker node exclusively wired to it.
+
+        Traces the DAG by following wires rather than assuming any node-ID naming
+        convention: the first stream ever added reuses the default template's bare
+        IDs (node_audio, node_chat, ...) while later streams get channel-suffixed
+        IDs, so ID-substring matching alone misses the former and leaves it orphaned.
+        """
         from services.ingest.stream_buffer import clean_channel_name
         clean_ch = clean_channel_name(channel)
 
-        nodes_to_remove = []
-        for nid, n in list(self.nodes.items()):
-            if n.get("type") == "StreamSourceNode" and clean_channel_name(n.get("properties", {}).get("channel", "")) == clean_ch:
-                nodes_to_remove.append(nid)
-            elif f"_{clean_ch}" in nid:
-                nodes_to_remove.append(nid)
+        target_stream_ids = {
+            nid for nid, n in self.nodes.items()
+            if n.get("type") == "StreamSourceNode"
+            and clean_channel_name(n.get("properties", {}).get("channel", "")) == clean_ch
+        }
+        if not target_stream_ids:
+            return self.get_graph()
+
+        other_stream_ids = {
+            nid for nid, n in self.nodes.items()
+            if n.get("type") == "StreamSourceNode" and nid not in target_stream_ids
+        }
+
+        def reachable_from(seed_ids: Set[str]) -> Set[str]:
+            seen = set(seed_ids)
+            queue = deque(seed_ids)
+            while queue:
+                cur = queue.popleft()
+                for wire in self.wires:
+                    src = wire.get("from", "").split(":")[0]
+                    dst = wire.get("to", "").split(":")[0]
+                    if src == cur and dst not in seen:
+                        seen.add(dst)
+                        queue.append(dst)
+            return seen
+
+        reachable_from_target = reachable_from(target_stream_ids)
+        reachable_from_others = reachable_from(other_stream_ids) if other_stream_ids else set()
+
+        # Never remove a node still reachable from another active stream
+        # (e.g. a shared ClipFolderNode wired from multiple renderers).
+        nodes_to_remove = reachable_from_target - reachable_from_others
 
         for nid in nodes_to_remove:
             self.nodes.pop(nid, None)
@@ -628,6 +660,26 @@ class GraphDAGManager:
         node = self.nodes.get(node_id)
         if not node:
             return False
+
+        # Reject renaming a StreamSourceNode onto a channel another StreamSourceNode
+        # already owns - each active stream must keep its own dedicated pipeline,
+        # never two pipelines silently pointing at the same channel.
+        if node.get("type") == "StreamSourceNode" and param == "channel":
+            from services.ingest.stream_buffer import clean_channel_name
+            new_ch = clean_channel_name(str(value))
+            collision = any(
+                nid != node_id
+                and n.get("type") == "StreamSourceNode"
+                and clean_channel_name(n.get("properties", {}).get("channel", "")) == new_ch
+                for nid, n in self.nodes.items()
+            )
+            if new_ch and collision:
+                logger.warning(
+                    "[GraphDAG] Refused to rename node %s to channel '%s': already owned by another StreamSourceNode",
+                    node_id, new_ch,
+                )
+                return False
+
         if "properties" not in node:
             node["properties"] = {}
         node["properties"][param] = value

@@ -818,10 +818,18 @@
         (n) => n.type === "StreamSourceNode"
       );
 
-      // Only update StreamSourceNode if there's exactly 1 stream source node.
-      // If multiple stream source nodes exist, each keeps its own channel!
-      if (streamSourceNodes.length === 1) {
-        const node = streamSourceNodes[0];
+      // Only repurpose the lone StreamSourceNode if it's still the untouched
+      // bootstrap placeholder ("marlon"/empty) or already represents this
+      // channel. Tab switches fire on this same code path right after adding
+      // a new stream, using this client's not-yet-refreshed node cache - if we
+      // renamed any already-bound node here, it would silently steal an
+      // existing stream's node out from under it (leaving that node and the
+      // new stream's own freshly-created pipeline both pointing at the new
+      // channel: two full pipelines for one active stream). See handleStreamAdded().
+      const soleNode = streamSourceNodes.length === 1 ? streamSourceNodes[0] : null;
+      const soleNodeCh = soleNode ? (soleNode.properties?.channel || "").replace(/^#/, "").toLowerCase() : null;
+      if (soleNode && (!soleNodeCh || soleNodeCh === "marlon" || soleNodeCh === cleanCh)) {
+        const node = soleNode;
         node.properties = node.properties || {};
         node.properties.channel = cleanCh;
         const plat = (node.properties.platform || "twitch").toLowerCase();
