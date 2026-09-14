@@ -216,33 +216,49 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         else:
             filter_args = []
 
-        cmd = [
-            "ffmpeg",
-            "-hide_banner",
-            "-loglevel", "error",
-            *inputs,
-            "-t", str(duration),
-            *filter_args,
-            "-c:v", encoder,
-            "-b:v", "6M",
-            "-pix_fmt", "yuv420p",
-            "-c:a", "aac",
-            "-b:a", "192k",
-            "-avoid_negative_ts", "make_zero",
-            "-y", output_path,
-        ]
+        def build_cmd(enc: str) -> List[str]:
+            return [
+                "ffmpeg",
+                "-hide_banner",
+                "-loglevel", "error",
+                *inputs,
+                "-t", str(duration),
+                *filter_args,
+                "-c:v", enc,
+                "-b:v", "6M",
+                "-pix_fmt", "yuv420p",
+                "-c:a", "aac",
+                "-b:a", "192k",
+                "-avoid_negative_ts", "make_zero",
+                "-y", output_path,
+            ]
 
         mode_str = "9:16 vertical" if crop_vertical else "Full-Sized (Uncropped)"
-        logger.info("[Render] Rendering clip [%.1fs - %.1fs] -> %s (Mode: %s, encoder: %s)", cut_start, cut_end, output_path, mode_str, encoder)
+        # detect_optimal_encoder() only confirms the encoder is compiled into ffmpeg, not
+        # that it actually works on this machine (e.g. an NVENC build against a newer
+        # driver API than what's installed) - so a hardware encoder failure falls back to
+        # the software encoder once rather than failing the whole render.
+        encoders_to_try = [encoder] if encoder == "libx264" else [encoder, "libx264"]
+        last_error = ""
         try:
-            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=90)
-            if res.returncode != 0:
-                logger.error("[Render] Rendering failed (code %d): %s", res.returncode, res.stderr)
-                return False
-            success = os.path.exists(output_path) and os.path.getsize(output_path) > 0
-            if success:
-                logger.info("[Render] Render complete: %s (%d bytes)", output_path, os.path.getsize(output_path))
-            return success
+            for attempt_encoder in encoders_to_try:
+                cmd = build_cmd(attempt_encoder)
+                logger.info(
+                    "[Render] Rendering clip [%.1fs - %.1fs] -> %s (Mode: %s, encoder: %s)",
+                    cut_start, cut_end, output_path, mode_str, attempt_encoder,
+                )
+                res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=90)
+                if res.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+                    logger.info("[Render] Render complete: %s (%d bytes)", output_path, os.path.getsize(output_path))
+                    return True
+                last_error = res.stderr
+                if attempt_encoder != encoders_to_try[-1]:
+                    logger.warning(
+                        "[Render] Encoder '%s' failed (code %d), falling back to libx264: %s",
+                        attempt_encoder, res.returncode, res.stderr,
+                    )
+            logger.error("[Render] Rendering failed: %s", last_error)
+            return False
         except Exception as e:
             logger.error("[Render] Rendering failed: %s", e)
             return False
