@@ -53,9 +53,11 @@ class KickChatVelocityEngine:
         spike_ratio_threshold: float = 3.0,
         instant_min_threshold: float = 10.0,
         chatroom_id: Optional[int] = None,
+        on_message_callback: Optional[Callable[[dict], None]] = None,
     ):
         self.channel = channel.lower().strip()
         self.on_spike = on_spike_callback
+        self.on_message = on_message_callback
         self.spike_ratio_threshold = spike_ratio_threshold
         self.instant_min_threshold = instant_min_threshold
         self.chatroom_id = chatroom_id
@@ -172,6 +174,12 @@ class KickChatVelocityEngine:
         msg_obj = {"user": user, "text": text, "time": now}
         self.recent_messages.append(msg_obj)
         self.window_messages.append(msg_obj)
+
+        if self.on_message:
+            try:
+                self.on_message(msg_obj)
+            except Exception as cb_err:
+                logger.debug("[KickChat:%s] Error in on_message: %s", self.channel, cb_err)
 
         self._update_metrics(now)
 

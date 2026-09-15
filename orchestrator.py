@@ -78,6 +78,7 @@ class StreamSession:
             self.chat_engine = KickChatVelocityEngine(
                 self.channel,
                 on_spike_callback=self._on_chat_spike,
+                on_message_callback=self._on_chat_message,
                 spike_ratio_threshold=float(os.getenv("HEURISTIC_CHAT_RATIO_THRESHOLD", "3.0")),
                 instant_min_threshold=float(os.getenv("HEURISTIC_CHAT_INSTANT_MIN", "10.0")),
             )
@@ -85,6 +86,7 @@ class StreamSession:
             self.chat_engine = TwitchChatVelocityEngine(
                 self.channel,
                 on_spike_callback=self._on_chat_spike,
+                on_message_callback=self._on_chat_message,
                 spike_ratio_threshold=float(os.getenv("HEURISTIC_CHAT_RATIO_THRESHOLD", "3.0")),
                 instant_min_threshold=float(os.getenv("HEURISTIC_CHAT_INSTANT_MIN", "10.0")),
             )
@@ -163,6 +165,23 @@ class StreamSession:
         )
         self.latest_screen_summary: Optional[dict] = None
 
+        # 8. Periodic Timer Trigger Service (Heartbeat Pulse Generator)
+        from services.heuristics.timer_trigger import TimerTriggerService
+        self.timer_trigger = TimerTriggerService(
+            interval_seconds=float(os.getenv("TIMER_TRIGGER_INTERVAL", "30.0")),
+            on_trigger_callback=self._on_timer_trigger,
+        )
+
+        # 9. GeoEstimation Worldwide Localization Service
+        from services.heuristics.geo_estimation import GeoEstimationService
+        self.geo_service = GeoEstimationService()
+
+        # 10. Stream Spying Keyword Surveillance Service
+        from services.heuristics.stream_spy import StreamSpyService
+        self.stream_spy = StreamSpyService(
+            on_trigger_callback=self._on_spy_trigger,
+        )
+
         # Telemetry metrics
         self.extra_telemetry = {
             "audio_rms_db": -60.0,
@@ -173,6 +192,9 @@ class StreamSession:
             "ocr_pnl_delta": 0.0,
             "ocr_extracted_areas": [],
             "slot_metrics": {},
+            "spy_match_count": 0,
+            "spy_last_keyword": "",
+            "spy_is_alert": False,
             "cv_top_label": "standby",
             "cv_confidence": 0.0,
             "cv_probabilities": {},
@@ -196,6 +218,17 @@ class StreamSession:
             "gambling_win": 0.0,
             "gambling_multiplier": 0.0,
             "gambling_spin_state": "IDLE",
+            "geo_lat": 0.0,
+            "geo_lng": 0.0,
+            "geo_confidence": 0.0,
+            "geo_country": "Worldwide",
+            "geo_country_code": "—",
+            "geo_flag": "🌍",
+            "geo_location_name": "Worldwide",
+            "geo_latency_ms": 0.0,
+            "geo_status": "standby",
+            "geo_trigger": False,
+            "geo_osm_url": "https://www.openstreetmap.org",
             "stream_frame_b64": "",
         }
         self.last_analyzed_segment: Optional[str] = None
@@ -342,6 +375,40 @@ class StreamSession:
             cv_label="rage tilt bet",
         )
 
+    def _on_timer_trigger(self, count: int, timestamp: float):
+        """Fires when periodic clock pulse interval elapses."""
+        logger.debug("[Session:%s][TimerPulse] Pulse #%d fired at %.2f", self.channel, count, timestamp)
+        self.extra_telemetry["timer_pulse_fired"] = True
+        self.extra_telemetry["timer_pulse_count"] = count
+
+    def _on_chat_message(self, msg: dict):
+        """Processes incoming chat message through stream spying service."""
+        if getattr(self, "stream_spy", None) and self.stream_spy.enabled and self.stream_spy.listen_chat:
+            self.stream_spy.process_chat_message(msg)
+
+    def _on_spy_trigger(self, event_data: dict):
+        """Fires when monitored keyword is detected in chat or audio."""
+        logger.info(
+            "[Session:%s][StreamSpy] KEYWORD DETECTED (%s): '%s' from '%s'",
+            self.channel,
+            event_data.get("source"),
+            event_data.get("keyword"),
+            event_data.get("user"),
+        )
+        self.extra_telemetry["spy_match_count"] = self.stream_spy.match_count
+        self.extra_telemetry["spy_last_keyword"] = event_data.get("keyword", "")
+        self.extra_telemetry["spy_is_alert"] = True
+
+        self.gate_evaluator.evaluate_signals(
+            source=f"stream_spy_{event_data.get('keyword')}",
+            chat_instant=self.chat_engine.v_instant if self.chat_engine else 0.0,
+            chat_ratio=self.chat_engine.spike_ratio if self.chat_engine else 1.0,
+            win_multiplier=self.ocr_engine.current_multiplier if self.ocr_engine else 1.0,
+            pnl_delta=self.ocr_engine.pnl_delta if self.ocr_engine else 0.0,
+            audio_db=self.audio_monitor.current_db if self.audio_monitor else -60.0,
+            audio_delta=self.audio_monitor.delta_db if self.audio_monitor else 0.0,
+        )
+
     def _on_trigger_activated(self, context: dict):
         """Immediately instantiates a tracked clipping job upon excitement spike detection."""
         job_id = self.orchestrator.create_job(self.channel, context)
@@ -408,6 +475,17 @@ class StreamSession:
             "gambling_multiplier": self.extra_telemetry.get("gambling_multiplier", 0.0),
             "gambling_spin_state": self.extra_telemetry.get("gambling_spin_state", "IDLE"),
             "gambling_ledger": self.gambling_ledger.get_summary() if getattr(self, "gambling_ledger", None) else {},
+            "geo_lat": self.extra_telemetry.get("geo_lat", 0.0),
+            "geo_lng": self.extra_telemetry.get("geo_lng", 0.0),
+            "geo_confidence": self.extra_telemetry.get("geo_confidence", 0.0),
+            "geo_country": self.extra_telemetry.get("geo_country", "Worldwide"),
+            "geo_country_code": self.extra_telemetry.get("geo_country_code", "—"),
+            "geo_flag": self.extra_telemetry.get("geo_flag", "🌍"),
+            "geo_location_name": self.extra_telemetry.get("geo_location_name", "Worldwide"),
+            "geo_latency_ms": self.extra_telemetry.get("geo_latency_ms", 0.0),
+            "geo_status": self.extra_telemetry.get("geo_status", "standby"),
+            "geo_trigger": self.extra_telemetry.get("geo_trigger", False),
+            "geo_osm_url": self.extra_telemetry.get("geo_osm_url", "https://www.openstreetmap.org"),
             "buffered_messages": calc["buffered_messages"],
             "total_messages": calc.get("total_messages", 0),
             "buffered_segments": self.buffer.get_segment_count() if self.buffer else 0,
@@ -746,6 +824,13 @@ class StreamClipperOrchestrator:
             except Exception as e:
                 logger.debug("[FrameExtractor] Error extracting frame: %s", e)
 
+        # 1c. Periodic Timer Trigger Pulse Check
+        if getattr(session, "timer_trigger", None):
+            try:
+                results["timer_pulse"] = session.timer_trigger.check_trigger()
+            except Exception as e:
+                logger.debug("[TimerTrigger] Error checking trigger: %s", e)
+
         # 1b. Image Resolution & Scaler Processing (Classical + Neural Super-Resolution)
         scaler_frame = None
         if getattr(session, "image_scaler", None) and frame is not None:
@@ -829,6 +914,16 @@ class StreamClipperOrchestrator:
                     })
             except Exception as e:
                 logger.debug("[DynamicOCR] Error processing frame: %s", e)
+
+        # 4h. GeoEstimation Worldwide Localization Service
+        if getattr(session, "geo_service", None) and frame is not None:
+            try:
+                timer_pulse = bool(results.get("timer_pulse", False))
+                if session.geo_service.should_run(timer_pulse=timer_pulse):
+                    geo_res = session.geo_service.predict_frame(frame, roi=getattr(session.geo_service, "roi", None))
+                    results["geo_res"] = geo_res
+            except Exception as e:
+                logger.debug("[GeoEstimation] Error processing frame: %s", e)
 
         # 5. Generate clean, compressed JPEG base64 frame thumbnail for in-node and stream ROI dragging
         thumb_b64 = ""
@@ -929,7 +1024,33 @@ class StreamClipperOrchestrator:
                                 if s_res.get("scaled_thumbnail_b64"):
                                     session.extra_telemetry["scaler_thumbnail_b64"] = s_res["scaled_thumbnail_b64"]
 
-                    # 4. Chat State Description (every X seconds)
+                            if heur_res.get("geo_res"):
+                                g_res = heur_res["geo_res"]
+                                session.extra_telemetry["geo_lat"] = g_res.get("lat", 0.0)
+                                session.extra_telemetry["geo_lng"] = g_res.get("lng", 0.0)
+                                session.extra_telemetry["geo_confidence"] = g_res.get("confidence", 0.0)
+                                session.extra_telemetry["geo_country"] = g_res.get("country", "Worldwide")
+                                session.extra_telemetry["geo_country_code"] = g_res.get("country_code", "—")
+                                session.extra_telemetry["geo_flag"] = g_res.get("flag", "🌍")
+                                session.extra_telemetry["geo_location_name"] = g_res.get("location_name", "Worldwide")
+                                session.extra_telemetry["geo_latency_ms"] = g_res.get("latency_ms", 0.0)
+                                session.extra_telemetry["geo_status"] = g_res.get("status", "standby")
+                                session.extra_telemetry["geo_trigger"] = g_res.get("geo_trigger", False)
+                                session.extra_telemetry["geo_osm_url"] = g_res.get("osm_url", "https://www.openstreetmap.org")
+
+                    # 4. Stream Spying Audio Surveillance Check
+                    if getattr(session, "stream_spy", None) and session.stream_spy.enabled and session.stream_spy.listen_audio:
+                        if hasattr(self, "transcriber") and self.transcriber and latest_seg and os.path.exists(latest_seg):
+                            audio_words = await asyncio.to_thread(self.transcriber.transcribe_words, latest_seg)
+                            if audio_words:
+                                session.stream_spy.process_audio_words(audio_words)
+
+                    if getattr(session, "stream_spy", None):
+                        session.extra_telemetry["spy_match_count"] = session.stream_spy.match_count
+                        session.extra_telemetry["spy_last_keyword"] = session.stream_spy.last_keyword
+                        session.extra_telemetry["spy_is_alert"] = session.stream_spy.is_alert_active()
+
+                    # 5. Chat State Description (every X seconds)
                     if session.chat_engine and session.chat_descriptor_service.enabled:
                         now = time.time()
                         if now - session.last_descriptor_time >= session.chat_descriptor_service.interval_seconds:

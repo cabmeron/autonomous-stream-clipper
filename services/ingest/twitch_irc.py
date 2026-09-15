@@ -38,9 +38,11 @@ class TwitchChatVelocityEngine:
         on_spike_callback: Optional[Callable[[float, float], None]] = None,
         spike_ratio_threshold: float = 3.0,
         instant_min_threshold: float = 10.0,
+        on_message_callback: Optional[Callable[[dict], None]] = None,
     ):
         self.channel = clean_channel_name(channel)
         self.on_spike = on_spike_callback
+        self.on_message = on_message_callback
         self.spike_ratio_threshold = spike_ratio_threshold
         self.instant_min_threshold = instant_min_threshold
 
@@ -97,6 +99,11 @@ class TwitchChatVelocityEngine:
                                     parsed["id"] = self.total_messages
                                     self.recent_messages.append(parsed)
                                     self.window_messages.append(parsed)
+                                    if self.on_message:
+                                        try:
+                                            self.on_message(parsed)
+                                        except Exception as cb_err:
+                                            logger.debug("[Chat:%s] Error in on_message: %s", self.channel, cb_err)
             except asyncio.CancelledError:
                 break
             except Exception as err:

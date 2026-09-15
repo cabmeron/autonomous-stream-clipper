@@ -1,6 +1,8 @@
-\# Autonomous Stream Clipper
+# Autonomous Stream Clipper
 
 ASC is a 100% local pipeline that captures viral stream moments in real time. 
+
+It monitors Twitch Chat velocity, audio volume surges, and on-screen OCR win multipliers across multiple live channels simultaneously. 
 
 Everything runs on your machine with zero external cloud dependencies or API keys required.
 
@@ -10,8 +12,7 @@ It optimizes boundaries around natural speech pauses and renders full-sized uncr
 
 All media and metadata are saved locally to an embedded SQLite database and local disk storage.
 
-<img width="1868" height="944" alt="Screenshot 2026-09-10 at 11 12 34 PM" src="https://github.com/user-attachments/assets/8968f0dc-deed-44ea-9586-16e82eb3b3e3" />
-<img width="1868" height="944" alt="Screenshot 2026-09-10 at 11 11 56 PM" src="https://github.com/user-attachments/assets/638bc556-f3ab-4fbd-bd33-97a1e4348bcf" />
+<img width="1153" height="847" alt="Screenshot 2026-09-03 at 12 33 55 PM" src="https://github.com/user-attachments/assets/d9cea51c-dfd0-4c42-bf4e-cb0418c4da89" />
 
 ## Installation
 

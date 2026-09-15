@@ -181,6 +181,62 @@
           ],
         },
         {
+          type: "SimpleGateNode",
+          category: "gate",
+          stage: "gate",
+          title: "Simple Timed Gate",
+          icon: "🚪",
+          desc: "Purely time-based stream gate taking video, audio, and chat streams and firing downstream outputs on a scheduled timer",
+          inputs_accepted: ["video", "audio", "chat", "trigger"],
+          outputs_produced: ["video", "audio", "chat", "trigger", "scalar"],
+          tags: [
+            "stage:gate", "in:video", "in:audio", "in:chat", "in:trigger",
+            "out:video", "out:audio", "out:chat", "out:trigger", "out:scalar",
+            "gate", "simple", "timed", "timer", "stream", "clock", "frequency", "slider", "pass-through", "scheduler"
+          ],
+        },
+        {
+          type: "TimerTriggerNode",
+          category: "trigger",
+          stage: "heuristic",
+          title: "Timer Trigger & Clock",
+          icon: "⏱️",
+          desc: "Periodic heartbeat pulse generator with interactive frequency slider (2s - 120s)",
+          inputs_accepted: ["video", "trigger"],
+          outputs_produced: ["trigger", "video", "scalar"],
+          tags: ["stage:heuristic", "in:video", "in:trigger", "out:trigger", "out:video", "out:scalar", "timer", "clock", "pulse", "interval", "heartbeat", "periodic", "trigger", "slider"],
+        },
+        {
+          type: "GeoEstimationNode",
+          category: "cv",
+          stage: "heuristic",
+          title: "Worldwide Geolocation (GeoEstimation)",
+          icon: "🌍",
+          desc: "Neural stream geolocation & multi-scale S2 localization predicting streamer coordinates, latitude/longitude, country, and OpenStreetMap pins",
+          inputs_accepted: ["video", "trigger"],
+          outputs_produced: ["scalar", "trigger", "text"],
+          tags: [
+            "stage:heuristic", "in:video", "in:trigger", "out:scalar", "out:trigger", "out:text",
+            "geolocation", "geolocate", "geo", "location", "gps", "coordinates", "latitude", "longitude",
+            "country", "map", "geoguessr", "geoguesser", "irl", "outdoor", "s2", "resnet", "world",
+            "vision", "travel", "where", "place", "city"
+          ],
+        },
+        {
+          type: "StreamSpyNode",
+          category: "heuristic",
+          stage: "heuristic",
+          title: "Stream Keyword Spy",
+          icon: "🕵️",
+          desc: "Real-time stream surveillance listening for target keywords in live chat and spoken audio, firing instant trigger pulses on match",
+          inputs_accepted: ["chat", "audio", "text", "video"],
+          outputs_produced: ["trigger", "scalar", "text"],
+          tags: [
+            "stage:heuristic", "in:chat", "in:audio", "in:text", "out:trigger", "out:scalar", "out:text",
+            "spy", "keyword", "surveillance", "listener", "chat", "audio", "trigger", "alert", "filter", "words"
+          ],
+        },
+        {
           type: "SegmentSlicerNode",
           category: "slicer",
           stage: "slicer",
@@ -2222,6 +2278,14 @@
         bodyEl.appendChild(widget);
       } else if (node.type === "ThresholdGateNode") {
         this.renderThresholdGateWidget(node, bodyEl);
+      } else if (node.type === "SimpleGateNode" || node.type === "BasicGateNode" || node.type === "TimedGateNode") {
+        this.renderSimpleGateWidget(node, bodyEl);
+      } else if (node.type === "TimerTriggerNode") {
+        this.renderTimerTriggerWidget(node, bodyEl);
+      } else if (node.type === "GeoEstimationNode") {
+        this.renderGeoEstimationWidget(node, bodyEl);
+      } else if (node.type === "StreamSpyNode" || node.type === "StreamSpyingNode" || node.type === "KeywordSpyNode") {
+        this.renderStreamSpyWidget(node, bodyEl);
       } else if (node.type === "HardwareRenderNode") {
         const widget = document.createElement("div");
         widget.setAttribute("class", "node-widget");
@@ -2487,6 +2551,447 @@
       bodyEl.appendChild(widget);
     }
 
+    renderTimerTriggerWidget(node, bodyEl) {
+      const props = node.properties || {};
+      const intervalSec = props.interval_seconds !== undefined ? parseFloat(props.interval_seconds) : 30.0;
+      const isEnabled = props.enabled !== false;
+
+      const widget = document.createElement("div");
+      widget.setAttribute("class", "node-widget timer-trigger-widget");
+      widget.setAttribute("id", `timer-widget-${node.id}`);
+
+      widget.innerHTML = `
+        <div class="widget-label" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+          <span style="display: flex; align-items: center; gap: 5px; font-weight: 700; color: #facc15;">
+            ⏱️ Clock Pulse Generator
+          </span>
+          <span class="widget-val" id="timer-status-${node.id}" style="font-size: 10px; padding: 2px 6px; border-radius: 4px; background: rgba(234, 179, 8, 0.2); color: #fde047; font-weight: 800; border: 1px solid rgba(234, 179, 8, 0.4);">
+            ${isEnabled ? "RUNNING" : "PAUSED"}
+          </span>
+        </div>
+
+        <div style="background: rgba(0,0,0,0.35); padding: 8px; border-radius: 6px; border: 1px solid rgba(250, 204, 21, 0.2); margin-bottom: 8px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+            <label style="font-size: 10px; color: #94a3b8; text-transform: uppercase; font-weight: 700;">Interval Frequency:</label>
+            <span id="timer-val-display-${node.id}" style="font-size: 13px; font-weight: 800; color: #facc15;">${intervalSec.toFixed(0)}s</span>
+          </div>
+
+          <input type="range" class="timer-interval-slider" id="timer-slider-${node.id}" min="2" max="120" step="1" value="${intervalSec}" style="width: 100%; accent-color: #facc15; cursor: pointer;" />
+
+          <div style="display: flex; justify-content: space-between; font-size: 9px; color: #64748b; margin-top: 2px;">
+            <span>2s (Fast)</span>
+            <span>30s</span>
+            <span>60s</span>
+            <span>120s (Slow)</span>
+          </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 8px;">
+          <div style="background: rgba(0,0,0,0.3); padding: 6px 8px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.08); text-align: center;">
+            <div style="font-size: 8px; color: #94a3b8; text-transform: uppercase;">Next Trigger In</div>
+            <div id="timer-countdown-${node.id}" style="font-size: 14px; font-weight: 800; color: #38bdf8;">${intervalSec.toFixed(0)}s</div>
+          </div>
+          <div style="background: rgba(0,0,0,0.3); padding: 6px 8px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.08); text-align: center;">
+            <div style="font-size: 8px; color: #94a3b8; text-transform: uppercase;">Triggers Fired</div>
+            <div id="timer-count-${node.id}" style="font-size: 14px; font-weight: 800; color: #10b981;">0</div>
+          </div>
+        </div>
+
+        <button type="button" class="timer-pulse-btn" id="btn-timer-pulse-${node.id}" style="width: 100%; display: flex; align-items: center; justify-content: center; gap: 6px; background: linear-gradient(135deg, rgba(234, 179, 8, 0.25), rgba(202, 138, 4, 0.4)); border: 1px solid #eab308; color: #fef08a; padding: 6px 10px; border-radius: 5px; font-size: 11px; font-weight: 700; cursor: pointer; transition: all 0.2s ease;">
+          ⚡ Pulse Trigger Now
+        </button>
+      `;
+
+      bodyEl.appendChild(widget);
+
+      const sliderEl = widget.querySelector(`#timer-slider-${node.id}`);
+      const valDisplayEl = widget.querySelector(`#timer-val-display-${node.id}`);
+      if (sliderEl) {
+        sliderEl.addEventListener("input", (e) => {
+          const val = parseFloat(e.target.value);
+          if (valDisplayEl) valDisplayEl.textContent = `${val.toFixed(0)}s`;
+          node.properties.interval_seconds = val;
+          node.title = `Timer Trigger: ${val.toFixed(0)}s`;
+          const titleEl = document.querySelector(`#node-${node.id} .node-title`);
+          if (titleEl) titleEl.textContent = node.title;
+        });
+
+        sliderEl.addEventListener("change", (e) => {
+          const val = parseFloat(e.target.value);
+          node.properties.interval_seconds = val;
+          this.syncNodeParamDebounced(node.id, "interval_seconds", val);
+        });
+      }
+
+      const pulseBtn = widget.querySelector(`#btn-timer-pulse-${node.id}`);
+      if (pulseBtn) {
+        pulseBtn.addEventListener("click", async () => {
+          pulseBtn.style.transform = "scale(0.96)";
+          try {
+            await fetch(`/api/graph/nodes/${node.id}/param`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ param: "pulse", value: true }),
+            });
+            this.pulseWiresFromNode(node.id);
+          } catch (err) {}
+          setTimeout(() => { pulseBtn.style.transform = ""; }, 150);
+        });
+      }
+    }
+
+    renderGeoEstimationWidget(node, bodyEl) {
+      const props = node.properties || {};
+      const confThreshold = props.confidence_threshold !== undefined ? parseFloat(props.confidence_threshold) : 50.0;
+      const isEnabled = props.enabled !== false;
+
+      const widget = document.createElement("div");
+      widget.setAttribute("class", "node-widget geo-estimation-widget");
+      widget.setAttribute("id", `geo-widget-${node.id}`);
+
+      widget.innerHTML = `
+        <div class="widget-label" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+          <span style="display: flex; align-items: center; gap: 5px; font-weight: 700; color: #38bdf8;">
+            🌍 Worldwide Localization
+          </span>
+          <span class="widget-val" id="geo-status-${node.id}" style="font-size: 10px; padding: 2px 6px; border-radius: 4px; background: rgba(56, 189, 248, 0.15); color: #38bdf8; font-weight: 800; border: 1px solid rgba(56, 189, 248, 0.3);">
+            ${isEnabled ? "STANDBY" : "DISABLED"}
+          </span>
+        </div>
+
+        <div style="background: rgba(0,0,0,0.35); padding: 8px; border-radius: 6px; border: 1px solid rgba(56, 189, 248, 0.2); margin-bottom: 8px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <span id="geo-flag-${node.id}" style="font-size: 16px;">🌍</span>
+              <strong id="geo-country-${node.id}" style="font-size: 12px; color: #f8fafc;">Worldwide</strong>
+            </div>
+            <span id="geo-latency-${node.id}" style="font-size: 9px; color: #94a3b8; background: rgba(255,255,255,0.06); padding: 1px 5px; border-radius: 3px;">0ms</span>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 6px;">
+            <div style="background: rgba(0,0,0,0.3); padding: 5px; border-radius: 4px; text-align: center;">
+              <div style="font-size: 8px; color: #94a3b8; text-transform: uppercase;">Latitude</div>
+              <div id="geo-lat-${node.id}" style="font-size: 12px; font-weight: 700; color: #38bdf8; font-family: monospace;">0.0000°</div>
+            </div>
+            <div style="background: rgba(0,0,0,0.3); padding: 5px; border-radius: 4px; text-align: center;">
+              <div style="font-size: 8px; color: #94a3b8; text-transform: uppercase;">Longitude</div>
+              <div id="geo-lng-${node.id}" style="font-size: 12px; font-weight: 700; color: #38bdf8; font-family: monospace;">0.0000°</div>
+            </div>
+          </div>
+
+          <div>
+            <div style="display: flex; justify-content: space-between; align-items: center; font-size: 9px; margin-bottom: 3px;">
+              <span style="color: #94a3b8;">Confidence</span>
+              <span id="geo-conf-${node.id}" style="font-weight: 700; color: #10b981;">0.0%</span>
+            </div>
+            <div style="width: 100%; height: 4px; background: rgba(255,255,255,0.1); border-radius: 2px; overflow: hidden;">
+              <div id="geo-conf-bar-${node.id}" style="width: 0%; height: 100%; background: linear-gradient(90deg, #38bdf8, #10b981); transition: width 0.3s ease;"></div>
+            </div>
+          </div>
+        </div>
+
+        <div style="margin-bottom: 8px;">
+          <a id="geo-osm-link-${node.id}" href="https://www.openstreetmap.org" target="_blank" rel="noopener noreferrer" style="display: flex; align-items: center; justify-content: center; gap: 5px; background: rgba(56, 189, 248, 0.1); border: 1px solid rgba(56, 189, 248, 0.3); color: #7dd3fc; padding: 5px 8px; border-radius: 4px; font-size: 10px; font-weight: 600; text-decoration: none; transition: all 0.2s ease;">
+            🗺️ View on OpenStreetMap ↗
+          </a>
+        </div>
+
+        <div style="background: rgba(0,0,0,0.25); padding: 6px 8px; border-radius: 5px; border: 1px solid rgba(255,255,255,0.06); margin-bottom: 8px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+            <label style="font-size: 9px; color: #94a3b8; text-transform: uppercase; font-weight: 700;">Min Match Confidence:</label>
+            <span id="geo-thresh-display-${node.id}" style="font-size: 11px; font-weight: 700; color: #38bdf8;">${confThreshold.toFixed(0)}%</span>
+          </div>
+          <input type="range" id="geo-thresh-slider-${node.id}" min="10" max="95" step="5" value="${confThreshold}" style="width: 100%; accent-color: #38bdf8; cursor: pointer;" />
+        </div>
+
+        <button type="button" class="geo-pulse-btn" id="btn-geo-pulse-${node.id}" style="width: 100%; display: flex; align-items: center; justify-content: center; gap: 6px; background: linear-gradient(135deg, rgba(56, 189, 248, 0.2), rgba(14, 165, 233, 0.35)); border: 1px solid #38bdf8; color: #e0f2fe; padding: 6px 10px; border-radius: 5px; font-size: 11px; font-weight: 700; cursor: pointer; transition: all 0.2s ease;">
+          ⚡ Locate Frame Now
+        </button>
+      `;
+
+      bodyEl.appendChild(widget);
+
+      const threshSlider = widget.querySelector(`#geo-thresh-slider-${node.id}`);
+      const threshDisplay = widget.querySelector(`#geo-thresh-display-${node.id}`);
+      if (threshSlider) {
+        threshSlider.addEventListener("input", (e) => {
+          const val = parseFloat(e.target.value);
+          if (threshDisplay) threshDisplay.textContent = `${val.toFixed(0)}%`;
+          node.properties.confidence_threshold = val;
+        });
+        threshSlider.addEventListener("change", (e) => {
+          const val = parseFloat(e.target.value);
+          node.properties.confidence_threshold = val;
+          this.syncNodeParamDebounced(node.id, "confidence_threshold", val);
+        });
+      }
+
+      const pulseBtn = widget.querySelector(`#btn-geo-pulse-${node.id}`);
+      if (pulseBtn) {
+        pulseBtn.addEventListener("click", async () => {
+          pulseBtn.style.transform = "scale(0.96)";
+          try {
+            await fetch(`/api/graph/nodes/${node.id}/param`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ param: "pulse", value: true }),
+            });
+            this.pulseWiresFromNode(node.id);
+          } catch (err) {}
+          setTimeout(() => { pulseBtn.style.transform = ""; }, 150);
+        });
+      }
+    }
+
+    renderSimpleGateWidget(node, bodyEl) {
+      const props = node.properties || {};
+      const intervalSec = props.interval_seconds !== undefined ? parseFloat(props.interval_seconds) : 30.0;
+      const isEnabled = props.enabled !== false;
+
+      const widget = document.createElement("div");
+      widget.setAttribute("class", "node-widget simple-gate-widget");
+      widget.setAttribute("id", `simple-gate-widget-${node.id}`);
+
+      widget.innerHTML = `
+        <div class="widget-label" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+          <span style="display: flex; align-items: center; gap: 5px; font-weight: 700; color: #38bdf8;">
+            🚪 Timed Stream Gate
+          </span>
+          <span class="widget-val" id="simple-gate-status-${node.id}" style="font-size: 10px; padding: 2px 6px; border-radius: 4px; background: rgba(56, 189, 248, 0.15); color: #38bdf8; font-weight: 800; border: 1px solid rgba(56, 189, 248, 0.3);">
+            ${isEnabled ? "ARMED ⏳" : "PAUSED"}
+          </span>
+        </div>
+
+        <div style="background: rgba(0,0,0,0.35); padding: 8px; border-radius: 6px; border: 1px solid rgba(56, 189, 248, 0.2); margin-bottom: 8px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+            <label style="font-size: 10px; color: #94a3b8; text-transform: uppercase; font-weight: 700;">Gate Fire Frequency:</label>
+            <span id="simple-gate-val-display-${node.id}" style="font-size: 13px; font-weight: 800; color: #38bdf8;">${intervalSec.toFixed(0)}s</span>
+          </div>
+
+          <input type="range" class="simple-gate-slider" id="simple-gate-slider-${node.id}" min="2" max="120" step="1" value="${intervalSec}" style="width: 100%; accent-color: #38bdf8; cursor: pointer;" />
+
+          <div style="display: flex; justify-content: space-between; font-size: 9px; color: #64748b; margin-top: 2px;">
+            <span>2s (Fast)</span>
+            <span>30s</span>
+            <span>60s</span>
+            <span>120s (Slow)</span>
+          </div>
+        </div>
+
+        <div style="display: flex; justify-content: space-around; background: rgba(0,0,0,0.25); padding: 6px; border-radius: 5px; border: 1px solid rgba(255,255,255,0.06); margin-bottom: 8px; font-size: 10px;">
+          <span id="gate-stream-video-${node.id}" style="display: flex; align-items: center; gap: 3px; color: #64748b;">
+            📹 Video
+          </span>
+          <span id="gate-stream-audio-${node.id}" style="display: flex; align-items: center; gap: 3px; color: #64748b;">
+            🔊 Audio
+          </span>
+          <span id="gate-stream-chat-${node.id}" style="display: flex; align-items: center; gap: 3px; color: #64748b;">
+            💬 Chat
+          </span>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 8px;">
+          <div style="background: rgba(0,0,0,0.3); padding: 6px 8px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.08); text-align: center;">
+            <div style="font-size: 8px; color: #94a3b8; text-transform: uppercase;">Next Fire In</div>
+            <div id="simple-gate-countdown-${node.id}" style="font-size: 14px; font-weight: 800; color: #38bdf8;">${intervalSec.toFixed(0)}s</div>
+          </div>
+          <div style="background: rgba(0,0,0,0.3); padding: 6px 8px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.08); text-align: center;">
+            <div style="font-size: 8px; color: #94a3b8; text-transform: uppercase;">Total Fires</div>
+            <div id="simple-gate-count-${node.id}" style="font-size: 14px; font-weight: 800; color: #10b981;">0</div>
+          </div>
+        </div>
+
+        <button type="button" class="simple-gate-pulse-btn" id="btn-simple-gate-pulse-${node.id}" style="width: 100%; display: flex; align-items: center; justify-content: center; gap: 6px; background: linear-gradient(135deg, rgba(56, 189, 248, 0.25), rgba(14, 165, 233, 0.4)); border: 1px solid #38bdf8; color: #e0f2fe; padding: 6px 10px; border-radius: 5px; font-size: 11px; font-weight: 700; cursor: pointer; transition: all 0.2s ease;">
+          ⚡ Fire Gate Now
+        </button>
+      `;
+
+      bodyEl.appendChild(widget);
+
+      const sliderEl = widget.querySelector(`#simple-gate-slider-${node.id}`);
+      const valDisplayEl = widget.querySelector(`#simple-gate-val-display-${node.id}`);
+      if (sliderEl) {
+        sliderEl.addEventListener("input", (e) => {
+          const val = parseFloat(e.target.value);
+          if (valDisplayEl) valDisplayEl.textContent = `${val.toFixed(0)}s`;
+          node.properties.interval_seconds = val;
+          node.title = `Timed Gate: ${val.toFixed(0)}s`;
+          const titleEl = document.querySelector(`#node-${node.id} .node-title`);
+          if (titleEl) titleEl.textContent = node.title;
+        });
+
+        sliderEl.addEventListener("change", (e) => {
+          const val = parseFloat(e.target.value);
+          node.properties.interval_seconds = val;
+          this.syncNodeParamDebounced(node.id, "interval_seconds", val);
+        });
+      }
+
+      const pulseBtn = widget.querySelector(`#btn-simple-gate-pulse-${node.id}`);
+      if (pulseBtn) {
+        pulseBtn.addEventListener("click", async () => {
+          pulseBtn.style.transform = "scale(0.96)";
+          try {
+            await fetch(`/api/graph/nodes/${node.id}/param`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ param: "pulse", value: true }),
+            });
+            this.pulseWiresFromNode(node.id);
+          } catch (err) {}
+          setTimeout(() => { pulseBtn.style.transform = ""; }, 150);
+        });
+      }
+    }
+
+    renderStreamSpyWidget(node, bodyEl) {
+      const props = node.properties || {};
+      const keywords = props.keywords || "clutch, ace, leak, drama, ban, insane, jackpot";
+      const cooldownSec = props.cooldown_seconds !== undefined ? parseFloat(props.cooldown_seconds) : 10.0;
+      const isEnabled = props.enabled !== false;
+      const listenChat = props.listen_chat !== false;
+      const listenAudio = props.listen_audio !== false;
+      const exactMatch = Boolean(props.exact_match);
+
+      const widget = document.createElement("div");
+      widget.setAttribute("class", "node-widget stream-spy-widget");
+      widget.setAttribute("id", `stream-spy-widget-${node.id}`);
+
+      widget.innerHTML = `
+        <div class="widget-label" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+          <span style="display: flex; align-items: center; gap: 5px; font-weight: 700; color: #2dd4bf;">
+            🕵️ Stream Keyword Spy
+          </span>
+          <span class="widget-val" id="spy-status-${node.id}" style="font-size: 10px; padding: 2px 6px; border-radius: 4px; background: rgba(45, 212, 191, 0.15); color: #2dd4bf; font-weight: 800; border: 1px solid rgba(45, 212, 191, 0.3);">
+            ${isEnabled ? "SPYING 🟢" : "PAUSED"}
+          </span>
+        </div>
+
+        <div style="background: rgba(0,0,0,0.4); padding: 8px; border-radius: 6px; border: 1px solid rgba(45, 212, 191, 0.2); margin-bottom: 8px;">
+          <div style="font-size: 9px; color: #94a3b8; text-transform: uppercase; font-weight: 700; margin-bottom: 4px;">
+            Target Keywords:
+          </div>
+          <input type="text" class="node-input-text spy-keywords-input" id="spy-keywords-${node.id}" value="${keywords}" placeholder="e.g. clutch, ace, leak, ban" style="width: 100%; box-sizing: border-box; background: rgba(0,0,0,0.6); border: 1px solid rgba(45, 212, 191, 0.4); border-radius: 4px; color: #a7f3d0; font-weight: 600; font-size: 11px; padding: 5px 6px;" />
+
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 8px;">
+            <label style="font-size: 10px; color: #94a3b8; font-weight: 700;">Cooldown / Debounce:</label>
+            <span id="spy-cooldown-display-${node.id}" style="font-size: 11px; font-weight: 800; color: #2dd4bf;">${cooldownSec.toFixed(0)}s</span>
+          </div>
+          <input type="range" class="spy-cooldown-slider" id="spy-cooldown-slider-${node.id}" min="2" max="60" step="1" value="${cooldownSec}" style="width: 100%; accent-color: #2dd4bf; cursor: pointer;" />
+        </div>
+
+        <div style="display: flex; justify-content: space-between; background: rgba(0,0,0,0.25); padding: 6px 8px; border-radius: 5px; border: 1px solid rgba(255,255,255,0.06); margin-bottom: 8px; font-size: 10px;">
+          <label style="display: flex; align-items: center; gap: 4px; color: #e2e8f0; cursor: pointer;">
+            <input type="checkbox" id="spy-chat-toggle-${node.id}" ${listenChat ? "checked" : ""} style="accent-color: #a855f7;" />
+            💬 Chat
+          </label>
+          <label style="display: flex; align-items: center; gap: 4px; color: #e2e8f0; cursor: pointer;">
+            <input type="checkbox" id="spy-audio-toggle-${node.id}" ${listenAudio ? "checked" : ""} style="accent-color: #38bdf8;" />
+            🎙️ Audio
+          </label>
+          <label style="display: flex; align-items: center; gap: 4px; color: #e2e8f0; cursor: pointer;">
+            <input type="checkbox" id="spy-exact-toggle-${node.id}" ${exactMatch ? "checked" : ""} style="accent-color: #2dd4bf;" />
+            🔤 Exact
+          </label>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 8px;">
+          <div style="background: rgba(0,0,0,0.3); padding: 6px 8px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.08); text-align: center;">
+            <div style="font-size: 8px; color: #94a3b8; text-transform: uppercase;">Total Matches</div>
+            <div id="spy-count-${node.id}" style="font-size: 15px; font-weight: 800; color: #34d399;">0</div>
+          </div>
+          <div style="background: rgba(0,0,0,0.3); padding: 6px 8px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.08); text-align: center;">
+            <div style="font-size: 8px; color: #94a3b8; text-transform: uppercase;">Velocity (/min)</div>
+            <div id="spy-velocity-${node.id}" style="font-size: 15px; font-weight: 800; color: #2dd4bf;">0.0/m</div>
+          </div>
+        </div>
+
+        <div style="background: rgba(0,0,0,0.5); padding: 6px 8px; border-radius: 4px; border: 1px solid rgba(45, 212, 191, 0.15); margin-bottom: 8px;">
+          <div style="display: flex; justify-content: space-between; font-size: 9px; color: #64748b; margin-bottom: 4px;">
+            <span>LAST DETECTION:</span>
+            <span id="spy-last-source-${node.id}" style="color: #2dd4bf; font-weight: 700;">—</span>
+          </div>
+          <div id="spy-last-snippet-${node.id}" style="font-size: 10px; color: #cbd5e1; font-style: italic; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+            Waiting for keywords...
+          </div>
+        </div>
+
+        <div id="spy-log-feed-${node.id}" style="max-height: 52px; overflow-y: auto; background: rgba(0,0,0,0.45); padding: 4px 6px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.05); font-family: monospace; font-size: 9px; color: #94a3b8; margin-bottom: 8px;">
+          <div style="color: #64748b; font-style: italic;">No alerts triggered yet</div>
+        </div>
+
+        <button type="button" class="spy-pulse-btn" id="btn-spy-pulse-${node.id}" style="width: 100%; display: flex; align-items: center; justify-content: center; gap: 6px; background: linear-gradient(135deg, rgba(45, 212, 191, 0.25), rgba(20, 184, 166, 0.4)); border: 1px solid #2dd4bf; color: #ccfbf1; padding: 6px 10px; border-radius: 5px; font-size: 11px; font-weight: 700; cursor: pointer; transition: all 0.2s ease;">
+          ⚡ Simulate Spy Trigger
+        </button>
+      `;
+
+      bodyEl.appendChild(widget);
+
+      const kwInput = widget.querySelector(`#spy-keywords-${node.id}`);
+      if (kwInput) {
+        kwInput.addEventListener("change", (e) => {
+          const val = e.target.value.trim();
+          node.properties.keywords = val;
+          this.syncNodeParamDebounced(node.id, "keywords", val);
+        });
+      }
+
+      const cooldownSlider = widget.querySelector(`#spy-cooldown-slider-${node.id}`);
+      const cooldownDisplay = widget.querySelector(`#spy-cooldown-display-${node.id}`);
+      if (cooldownSlider) {
+        cooldownSlider.addEventListener("input", (e) => {
+          const val = parseFloat(e.target.value);
+          if (cooldownDisplay) cooldownDisplay.textContent = `${val.toFixed(0)}s`;
+          node.properties.cooldown_seconds = val;
+        });
+        cooldownSlider.addEventListener("change", (e) => {
+          const val = parseFloat(e.target.value);
+          node.properties.cooldown_seconds = val;
+          this.syncNodeParamDebounced(node.id, "cooldown_seconds", val);
+        });
+      }
+
+      const chatToggle = widget.querySelector(`#spy-chat-toggle-${node.id}`);
+      if (chatToggle) {
+        chatToggle.addEventListener("change", (e) => {
+          node.properties.listen_chat = e.target.checked;
+          this.syncNodeParamDebounced(node.id, "listen_chat", e.target.checked);
+        });
+      }
+
+      const audioToggle = widget.querySelector(`#spy-audio-toggle-${node.id}`);
+      if (audioToggle) {
+        audioToggle.addEventListener("change", (e) => {
+          node.properties.listen_audio = e.target.checked;
+          this.syncNodeParamDebounced(node.id, "listen_audio", e.target.checked);
+        });
+      }
+
+      const exactToggle = widget.querySelector(`#spy-exact-toggle-${node.id}`);
+      if (exactToggle) {
+        exactToggle.addEventListener("change", (e) => {
+          node.properties.exact_match = e.target.checked;
+          this.syncNodeParamDebounced(node.id, "exact_match", e.target.checked);
+        });
+      }
+
+      const pulseBtn = widget.querySelector(`#btn-spy-pulse-${node.id}`);
+      if (pulseBtn) {
+        pulseBtn.addEventListener("click", async () => {
+          pulseBtn.style.transform = "scale(0.96)";
+          try {
+            await fetch(`/api/graph/nodes/${node.id}/param`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ param: "pulse", value: true }),
+            });
+            this.pulseWiresFromNode(node.id);
+          } catch (err) {}
+          setTimeout(() => { pulseBtn.style.transform = ""; }, 150);
+        });
+      }
+    }
+
     /* -------------------------------------------------------------
        Real-Time Telemetry & Visual Pulses
        ------------------------------------------------------------- */
@@ -2556,6 +3061,223 @@
                   });
                 });
               }
+            }
+          }
+          return;
+        }
+
+        if (node.type === "TimerTriggerNode") {
+          const nodesData = telemetry.nodes || {};
+          const timerData = nodesData[node.id] || {};
+          const statusEl = document.getElementById(`timer-status-${node.id}`);
+          const countdownEl = document.getElementById(`timer-countdown-${node.id}`);
+          const countEl = document.getElementById(`timer-count-${node.id}`);
+          const isFiring = Boolean(timerData.is_firing);
+          const countdown = timerData.countdown !== undefined ? timerData.countdown : (node.properties?.interval_seconds || 30);
+          const triggerCount = timerData.trigger_count ?? 0;
+
+          if (countdownEl) {
+            countdownEl.textContent = `${Number(countdown).toFixed(0)}s`;
+            countdownEl.style.color = isFiring ? "#facc15" : "#38bdf8";
+          }
+          if (countEl) {
+            countEl.textContent = `${triggerCount}`;
+          }
+          if (statusEl) {
+            if (isFiring) {
+              statusEl.textContent = "PULSE ⚡";
+              statusEl.style.background = "rgba(234, 179, 8, 0.4)";
+              statusEl.style.color = "#fef08a";
+              document.getElementById(`node-${node.id}`)?.classList.add("spiking");
+              this.pulseWiresFromNode(node.id);
+            } else {
+              statusEl.textContent = timerData.enabled !== false ? "RUNNING" : "PAUSED";
+              statusEl.style.background = "rgba(234, 179, 8, 0.15)";
+              statusEl.style.color = "#fde047";
+              document.getElementById(`node-${node.id}`)?.classList.remove("spiking");
+            }
+          }
+          return;
+        }
+
+        if (node.type === "GeoEstimationNode") {
+          const nodesData = telemetry.nodes || {};
+          const geoData = nodesData[node.id] || {};
+          const statusEl = document.getElementById(`geo-status-${node.id}`);
+          const latEl = document.getElementById(`geo-lat-${node.id}`);
+          const lngEl = document.getElementById(`geo-lng-${node.id}`);
+          const countryEl = document.getElementById(`geo-country-${node.id}`);
+          const flagEl = document.getElementById(`geo-flag-${node.id}`);
+          const confEl = document.getElementById(`geo-conf-${node.id}`);
+          const confBarEl = document.getElementById(`geo-conf-bar-${node.id}`);
+          const latencyEl = document.getElementById(`geo-latency-${node.id}`);
+          const osmLinkEl = document.getElementById(`geo-osm-link-${node.id}`);
+
+          const lat = geoData.lat ?? 0.0;
+          const lng = geoData.lng ?? 0.0;
+          const conf = geoData.confidence ?? 0.0;
+          const country = geoData.country || "Worldwide";
+          const flag = geoData.flag || "🌍";
+          const latency = geoData.latency_ms ?? 0.0;
+          const status = geoData.status || "standby";
+          const isTrigger = Boolean(geoData.geo_trigger);
+          const osmUrl = geoData.osm_url || `https://www.openstreetmap.org/?mlat=${Number(lat).toFixed(4)}&mlon=${Number(lng).toFixed(4)}#map=10/${Number(lat).toFixed(4)}/${Number(lng).toFixed(4)}`;
+
+          if (latEl) latEl.textContent = `${Number(lat).toFixed(4)}°`;
+          if (lngEl) lngEl.textContent = `${Number(lng).toFixed(4)}°`;
+          if (countryEl) countryEl.textContent = country;
+          if (flagEl) flagEl.textContent = flag;
+          if (confEl) confEl.textContent = `${Number(conf).toFixed(1)}%`;
+          if (confBarEl) confBarEl.style.width = `${Math.min(100, Math.max(0, conf))}%`;
+          if (latencyEl) latencyEl.textContent = `${Number(latency).toFixed(0)}ms`;
+          if (osmLinkEl) osmLinkEl.setAttribute("href", osmUrl);
+
+          if (statusEl) {
+            if (status === "locked") {
+              statusEl.textContent = "LOCKED 📍";
+              statusEl.style.background = "rgba(16, 185, 129, 0.2)";
+              statusEl.style.color = "#34d399";
+              statusEl.style.borderColor = "rgba(16, 185, 129, 0.4)";
+            } else if (status === "simulated") {
+              statusEl.textContent = "SIMULATED 🛰️";
+              statusEl.style.background = "rgba(56, 189, 248, 0.2)";
+              statusEl.style.color = "#38bdf8";
+              statusEl.style.borderColor = "rgba(56, 189, 248, 0.4)";
+            } else {
+              statusEl.textContent = status.toUpperCase();
+              statusEl.style.background = "rgba(255, 255, 255, 0.08)";
+              statusEl.style.color = "#94a3b8";
+              statusEl.style.borderColor = "rgba(255, 255, 255, 0.15)";
+            }
+          }
+
+          if (isTrigger) {
+            this.pulseWiresFromNode(node.id);
+            document.getElementById(`node-${node.id}`)?.classList.add("spiking");
+            setTimeout(() => {
+              document.getElementById(`node-${node.id}`)?.classList.remove("spiking");
+            }, 500);
+          }
+          return;
+        }
+
+        if (node.type === "SimpleGateNode" || node.type === "BasicGateNode" || node.type === "TimedGateNode") {
+          const nodesData = telemetry.nodes || {};
+          const gateData = nodesData[node.id] || {};
+          const statusEl = document.getElementById(`simple-gate-status-${node.id}`);
+          const countdownEl = document.getElementById(`simple-gate-countdown-${node.id}`);
+          const countEl = document.getElementById(`simple-gate-count-${node.id}`);
+          const videoEl = document.getElementById(`gate-stream-video-${node.id}`);
+          const audioEl = document.getElementById(`gate-stream-audio-${node.id}`);
+          const chatEl = document.getElementById(`gate-stream-chat-${node.id}`);
+
+          const isFiring = Boolean(gateData.is_firing || gateData.is_open);
+          const countdown = gateData.countdown !== undefined ? gateData.countdown : (node.properties?.interval_seconds || 30);
+          const fireCount = gateData.fire_count ?? 0;
+
+          if (countdownEl) {
+            countdownEl.textContent = `${Number(countdown).toFixed(0)}s`;
+            countdownEl.style.color = isFiring ? "#38bdf8" : "#94a3b8";
+          }
+          if (countEl) {
+            countEl.textContent = `${fireCount}`;
+          }
+
+          if (videoEl) {
+            videoEl.style.color = gateData.has_video ? (isFiring ? "#38bdf8" : "#f8fafc") : "#64748b";
+            videoEl.style.fontWeight = gateData.has_video ? "700" : "400";
+          }
+          if (audioEl) {
+            audioEl.style.color = gateData.has_audio ? (isFiring ? "#10b981" : "#f8fafc") : "#64748b";
+            audioEl.style.fontWeight = gateData.has_audio ? "700" : "400";
+          }
+          if (chatEl) {
+            chatEl.style.color = gateData.has_chat ? (isFiring ? "#a855f7" : "#f8fafc") : "#64748b";
+            chatEl.style.fontWeight = gateData.has_chat ? "700" : "400";
+          }
+
+          if (statusEl) {
+            if (isFiring) {
+              statusEl.textContent = "FIRING ⚡";
+              statusEl.style.background = "rgba(56, 189, 248, 0.4)";
+              statusEl.style.color = "#e0f2fe";
+              statusEl.style.borderColor = "rgba(56, 189, 248, 0.6)";
+              document.getElementById(`node-${node.id}`)?.classList.add("spiking");
+              this.pulseWiresFromNode(node.id);
+            } else {
+              statusEl.textContent = gateData.enabled !== false ? "ARMED ⏳" : "PAUSED";
+              statusEl.style.background = "rgba(56, 189, 248, 0.15)";
+              statusEl.style.color = "#38bdf8";
+              statusEl.style.borderColor = "rgba(56, 189, 248, 0.3)";
+              document.getElementById(`node-${node.id}`)?.classList.remove("spiking");
+            }
+          }
+          return;
+        }
+
+        if (node.type === "StreamSpyNode" || node.type === "StreamSpyingNode" || node.type === "KeywordSpyNode") {
+          const nodesData = telemetry.nodes || {};
+          const spyData = nodesData[node.id] || {};
+          const statusEl = document.getElementById(`spy-status-${node.id}`);
+          const countEl = document.getElementById(`spy-count-${node.id}`);
+          const velEl = document.getElementById(`spy-velocity-${node.id}`);
+          const lastSourceEl = document.getElementById(`spy-last-source-${node.id}`);
+          const lastSnippetEl = document.getElementById(`spy-last-snippet-${node.id}`);
+          const logFeedEl = document.getElementById(`spy-log-feed-${node.id}`);
+
+          const matchCount = spyData.match_count ?? 0;
+          const velocity = spyData.keyword_velocity ?? 0.0;
+          const isAlert = Boolean(spyData.is_alert || spyData.is_trigger);
+          const isEnabled = spyData.enabled !== false;
+          const status = spyData.status || (isEnabled ? "spying" : "paused");
+
+          if (countEl) countEl.textContent = `${matchCount}`;
+          if (velEl) velEl.textContent = `${Number(velocity).toFixed(1)}/m`;
+
+          if (lastSourceEl && spyData.last_match_source) {
+            lastSourceEl.textContent = `[${spyData.last_match_source.toUpperCase()}] ${spyData.last_keyword ? `"${spyData.last_keyword}"` : ""}`;
+          }
+          if (lastSnippetEl && spyData.last_snippet) {
+            lastSnippetEl.textContent = `"${spyData.last_snippet}" (${spyData.last_match_user || "anon"})`;
+          }
+
+          if (logFeedEl && Array.isArray(spyData.recent_matches) && spyData.recent_matches.length > 0) {
+            logFeedEl.innerHTML = spyData.recent_matches.slice(-5).map(m => `
+              <div style="margin-bottom: 2px; line-height: 1.3;">
+                <span style="color: #64748b;">${m.time_str || ""}</span>
+                <span style="color: ${m.source === 'chat' ? '#a855f7' : '#38bdf8'}; font-weight: 700;">[${(m.source || 'chat').toUpperCase()}]</span>
+                <strong style="color: #facc15;">${m.keyword || ''}</strong>:
+                <span style="color: #cbd5e1;">${(m.snippet || '').slice(0, 45)}</span>
+              </div>
+            `).join("");
+          }
+
+          if (statusEl) {
+            if (isAlert) {
+              statusEl.textContent = "ALERT 🚨";
+              statusEl.style.background = "rgba(244, 63, 94, 0.35)";
+              statusEl.style.color = "#fda4af";
+              statusEl.style.borderColor = "rgba(244, 63, 94, 0.6)";
+              document.getElementById(`node-${node.id}`)?.classList.add("spiking");
+              this.pulseWiresFromNode(node.id);
+            } else if (status === "cooldown") {
+              statusEl.textContent = `COOLDOWN ⏳ (${spyData.cooldown_remaining || 0}s)`;
+              statusEl.style.background = "rgba(234, 179, 8, 0.2)";
+              statusEl.style.color = "#fde047";
+              statusEl.style.borderColor = "rgba(234, 179, 8, 0.4)";
+              document.getElementById(`node-${node.id}`)?.classList.remove("spiking");
+            } else if (isEnabled) {
+              statusEl.textContent = "SPYING 🟢";
+              statusEl.style.background = "rgba(45, 212, 191, 0.15)";
+              statusEl.style.color = "#2dd4bf";
+              statusEl.style.borderColor = "rgba(45, 212, 191, 0.3)";
+              document.getElementById(`node-${node.id}`)?.classList.remove("spiking");
+            } else {
+              statusEl.textContent = "PAUSED";
+              statusEl.style.background = "rgba(255, 255, 255, 0.08)";
+              statusEl.style.color = "#94a3b8";
+              statusEl.style.borderColor = "rgba(255, 255, 255, 0.15)";
+              document.getElementById(`node-${node.id}`)?.classList.remove("spiking");
             }
           }
           return;
@@ -3639,10 +4361,13 @@
               const reqStage = lower.slice(6);
               if (item.stage !== reqStage) return;
             } else {
-              const matchTitle = item.title.toLowerCase().includes(lower);
+              const matchTitle = item.title.toLowerCase().includes(lower) || lower.includes(item.title.toLowerCase());
               const matchDesc = item.desc.toLowerCase().includes(lower);
-              const matchType = item.type.toLowerCase().includes(lower);
-              const matchTags = (item.tags || []).some((t) => t.toLowerCase().includes(lower));
+              const matchType = item.type.toLowerCase().includes(lower) || lower.includes(item.type.toLowerCase());
+              const matchTags = (item.tags || []).some((t) => {
+                const tLow = t.toLowerCase();
+                return tLow.includes(lower) || lower.includes(tLow);
+              });
               if (!matchTitle && !matchDesc && !matchType && !matchTags) return;
             }
           }
@@ -3846,7 +4571,7 @@
           { id: "neutral", name: "Neutral Metric", type: "scalar", min: 0.0, max: 1.0, step: 0.01, unit: "%" },
           { id: "contempt", name: "Contempt Metric", type: "scalar", min: 0.0, max: 1.0, step: 0.01, unit: "%" },
         ];
-      } else if (type === "ThresholdGateNode" || type === "BasicGateNode" || type === "ValueGateNode") {
+      } else if (type === "ThresholdGateNode" || type === "ValueGateNode") {
         type = "ThresholdGateNode";
         inputs = [
           { id: "val_1", name: "Value In 1", type: "scalar" },
@@ -3855,6 +4580,58 @@
           { id: "trigger_out", name: "Gate Trigger Out", type: "trigger" },
           { id: "passed_count", name: "Passed Inputs", type: "scalar", min: 0.0, max: 10.0, step: 1.0, unit: "" },
           { id: "active", name: "Gate Active (0/1)", type: "scalar", min: 0.0, max: 1.0, step: 1.0, unit: "" },
+        ];
+      } else if (type === "SimpleGateNode" || type === "BasicGateNode" || type === "TimedGateNode") {
+        type = "SimpleGateNode";
+        inputs = [
+          { id: "video_in", name: "Video In", type: "video" },
+          { id: "audio_in", name: "Audio In", type: "audio" },
+          { id: "chat_in", name: "Chat In", type: "chat" },
+          { id: "sync_in", name: "Sync / Reset In", type: "trigger" },
+        ];
+        outputs = [
+          { id: "video_out", name: "Gated Video Out", type: "video" },
+          { id: "audio_out", name: "Gated Audio Out", type: "audio" },
+          { id: "chat_out", name: "Gated Chat Out", type: "chat" },
+          { id: "gate_trigger", name: "Gate Fired Pulse", type: "trigger" },
+          { id: "countdown", name: "Countdown (s)", type: "scalar", min: 0.0, max: 120.0, step: 0.5, unit: "s" },
+          { id: "is_open", name: "Gate Open (0/1)", type: "scalar", min: 0.0, max: 1.0, step: 1.0, unit: "" },
+        ];
+      } else if (type === "TimerTriggerNode") {
+        inputs = [
+          { id: "video_in", name: "Video In", type: "video" },
+          { id: "sync_in", name: "Sync / Reset In", type: "trigger" },
+        ];
+        outputs = [
+          { id: "trigger_out", name: "Timer Pulse Out", type: "trigger" },
+          { id: "video_out", name: "Triggered Video Out", type: "video" },
+          { id: "countdown", name: "Countdown (s)", type: "scalar", min: 0.0, max: 120.0, step: 0.5, unit: "s" },
+          { id: "trigger_count", name: "Pulses Fired", type: "scalar", min: 0.0, max: 10000.0, step: 1.0, unit: "" },
+        ];
+      } else if (type === "GeoEstimationNode") {
+        inputs = [
+          { id: "video_in", name: "Video In", type: "video" },
+          { id: "trigger_in", name: "Trigger In", type: "trigger" },
+        ];
+        outputs = [
+          { id: "lat", name: "Latitude", type: "scalar", min: -90.0, max: 90.0, step: 0.0001, unit: "°" },
+          { id: "lng", name: "Longitude", type: "scalar", min: -180.0, max: 180.0, step: 0.0001, unit: "°" },
+          { id: "confidence", name: "Confidence %", type: "scalar", min: 0.0, max: 100.0, step: 0.1, unit: "%" },
+          { id: "geo_trigger", name: "Geo Match Trigger", type: "trigger" },
+          { id: "location_name", name: "Country / Region", type: "text" },
+        ];
+      } else if (type === "StreamSpyNode" || type === "StreamSpyingNode" || type === "KeywordSpyNode") {
+        type = "StreamSpyNode";
+        inputs = [
+          { id: "chat_in", name: "Chat In", type: "chat" },
+          { id: "audio_in", name: "Audio In", type: "audio" },
+          { id: "text_in", name: "Text / OCR In", type: "text" },
+        ];
+        outputs = [
+          { id: "spy_trigger", name: "Keyword Pulse", type: "trigger" },
+          { id: "match_count", name: "Total Matches", type: "scalar", min: 0.0, max: 1000.0, step: 1.0, unit: "" },
+          { id: "keyword_velocity", name: "Velocity (/min)", type: "scalar", min: 0.0, max: 100.0, step: 0.5, unit: "/m" },
+          { id: "last_keyword", name: "Last Keyword", type: "text" },
         ];
       } else if (type === "GamblingLedgerNode") {
         inputs = [{ id: "ocr_in", name: "OCR Data In", type: "scalar" }];
@@ -3945,6 +4722,29 @@
             label: "Value In 1",
           },
         };
+      } else if (type === "TimerTriggerNode") {
+        newNode.title = "Timer Trigger: 30s";
+        newNode.properties.interval_seconds = 30;
+        newNode.properties.enabled = true;
+      } else if (type === "GeoEstimationNode") {
+        newNode.title = "GeoEstimation Worldwide";
+        newNode.properties.interval_seconds = 30;
+        newNode.properties.confidence_threshold = 50;
+        newNode.properties.enabled = true;
+      } else if (type === "SimpleGateNode" || type === "BasicGateNode" || type === "TimedGateNode") {
+        newNode.title = "Timed Gate: 30s";
+        newNode.properties.interval_seconds = 30;
+        newNode.properties.gate_duration = 2.0;
+        newNode.properties.enabled = true;
+      } else if (type === "StreamSpyNode" || type === "StreamSpyingNode" || type === "KeywordSpyNode") {
+        newNode.title = "Stream Keyword Spy";
+        newNode.properties.keywords = "clutch, ace, leak, drama, ban, insane, jackpot";
+        newNode.properties.cooldown_seconds = 10;
+        newNode.properties.exact_match = false;
+        newNode.properties.case_sensitive = false;
+        newNode.properties.listen_chat = true;
+        newNode.properties.listen_audio = true;
+        newNode.properties.enabled = true;
       }
 
       this.nodes.set(newId, newNode);
@@ -3970,10 +4770,10 @@
         if (node.type === "StreamSourceNode") {
           node.position = [streamX, yCounters.col1];
           yCounters.col1 += 260;
-        } else if (["VideoCropNode", "ImageScaleNode", "AudioMonitorNode", "ChatVelocityNode", "CVTransformerNode", "OCRVisionNode", "FacecamEmotionNode", "ScreenSummarizerNode"].includes(node.type)) {
+        } else if (["VideoCropNode", "ImageScaleNode", "AudioMonitorNode", "ChatVelocityNode", "CVTransformerNode", "OCRVisionNode", "FacecamEmotionNode", "ScreenSummarizerNode", "TimerTriggerNode", "GeoEstimationNode", "StreamSpyNode"].includes(node.type)) {
           node.position = [col2X, yCounters.col2];
-          yCounters.col2 += (node.type === "CVTransformerNode" || node.type === "FacecamEmotionNode" || node.type === "VideoCropNode" || node.type === "ImageScaleNode" ? 340 : 220);
-        } else if (node.type === "GamblingLedgerNode" || node.type === "GateEvaluatorNode" || node.type === "ThresholdGateNode") {
+          yCounters.col2 += (node.type === "CVTransformerNode" || node.type === "FacecamEmotionNode" || node.type === "VideoCropNode" || node.type === "ImageScaleNode" || node.type === "GeoEstimationNode" || node.type === "StreamSpyNode" ? 340 : 220);
+        } else if (["GamblingLedgerNode", "GateEvaluatorNode", "ThresholdGateNode", "SimpleGateNode", "BasicGateNode", "TimedGateNode"].includes(node.type)) {
           node.position = [col3X, yCounters.col3];
           yCounters.col3 += 260;
         } else if (node.type === "SegmentSlicerNode") {

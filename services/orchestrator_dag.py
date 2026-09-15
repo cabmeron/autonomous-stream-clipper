@@ -44,6 +44,9 @@ class GraphDAGManager:
         self.graph_id = "default_studio_graph"
         self.nodes: Dict[str, dict] = {}
         self.wires: List[dict] = []  # List of {"id": str, "from": str, "to": str, "type": str}
+        self.node_timers: Dict[str, Any] = {}
+        self.node_simple_gates: Dict[str, Any] = {}
+        self.node_stream_spies: Dict[str, Any] = {}
         self.last_sync_time = time.time()
 
         # Initialize graph topology: empty by default, or populated if requested
@@ -617,6 +620,46 @@ class GraphDAGManager:
         logger.info("[GraphDAG] Synced graph topology (%d nodes, %d wires)", len(self.nodes), len(self.wires))
         return True, "Graph synced successfully"
 
+    def get_or_create_timer(self, node_id: str, interval_seconds: float = 30.0):
+        """Retrieves or instantiates an independent TimerTriggerService for a node."""
+        from services.heuristics.timer_trigger import TimerTriggerService
+        if node_id not in self.node_timers:
+            self.node_timers[node_id] = TimerTriggerService(interval_seconds=interval_seconds)
+        else:
+            if interval_seconds > 0:
+                self.node_timers[node_id].update_interval(interval_seconds)
+        return self.node_timers[node_id]
+
+    def get_or_create_simple_gate(self, node_id: str, interval_seconds: float = 30.0, gate_duration: float = 2.0):
+        """Retrieves or instantiates an independent SimpleGateService for a node."""
+        from services.heuristics.simple_gate import SimpleGateService
+        if node_id not in self.node_simple_gates:
+            self.node_simple_gates[node_id] = SimpleGateService(
+                interval_seconds=interval_seconds,
+                gate_duration=gate_duration
+            )
+        else:
+            if interval_seconds > 0:
+                self.node_simple_gates[node_id].update_interval(interval_seconds)
+            if gate_duration > 0:
+                self.node_simple_gates[node_id].update_duration(gate_duration)
+        return self.node_simple_gates[node_id]
+
+    def get_or_create_stream_spy(self, node_id: str, keywords: Optional[Any] = None, cooldown_seconds: float = 10.0):
+        """Retrieves or instantiates an independent StreamSpyService for a node."""
+        from services.heuristics.stream_spy import StreamSpyService
+        if node_id not in self.node_stream_spies:
+            self.node_stream_spies[node_id] = StreamSpyService(
+                keywords=keywords,
+                cooldown_seconds=cooldown_seconds,
+            )
+        else:
+            if keywords is not None:
+                self.node_stream_spies[node_id].set_keywords(keywords)
+            if cooldown_seconds > 0:
+                self.node_stream_spies[node_id].update_settings(cooldown_seconds=cooldown_seconds)
+        return self.node_stream_spies[node_id]
+
     def update_node_param(self, node_id: str, param: str, value: Any) -> bool:
         """Mutates a specific node parameter and propagates to running worker immediately."""
         node = self.nodes.get(node_id)
@@ -632,6 +675,70 @@ class GraphDAGManager:
                 node["title"] = f"{plat} Source: #{ch}"
         if node.get("type") == "ClipFolderNode" and param == "folder_name":
             node["title"] = f"Clip Folder: {value}"
+        if node.get("type") == "TimerTriggerNode":
+            if param == "interval_seconds":
+                timer = self.get_or_create_timer(node_id, float(value))
+                timer.update_interval(float(value))
+                node["title"] = f"Timer Trigger: {float(value):.0f}s"
+            elif param == "pulse":
+                timer = self.get_or_create_timer(node_id)
+                timer.manual_pulse()
+            elif param == "enabled":
+                timer = self.get_or_create_timer(node_id)
+                timer.enabled = bool(value)
+        if node.get("type") == "GeoEstimationNode":
+            session = self.get_node_source_session(node_id)
+            if param == "interval_seconds":
+                node["properties"]["interval_seconds"] = float(value)
+                if session and getattr(session, "geo_service", None):
+                    session.geo_service.interval_seconds = float(value)
+            elif param == "pulse":
+                if session and getattr(session, "geo_service", None):
+                    session.geo_service.manual_pulse()
+            elif param == "confidence_threshold":
+                node["properties"]["confidence_threshold"] = float(value)
+                if session and getattr(session, "geo_service", None):
+                    session.geo_service.confidence_threshold = float(value)
+            elif param == "enabled":
+                node["properties"]["enabled"] = bool(value)
+                if session and getattr(session, "geo_service", None):
+                    session.geo_service.enabled = bool(value)
+        if node.get("type") in ("SimpleGateNode", "BasicGateNode", "TimedGateNode"):
+            gate = self.get_or_create_simple_gate(node_id)
+            if param == "interval_seconds":
+                gate.update_interval(float(value))
+                node["title"] = f"Timed Gate: {float(value):.0f}s"
+            elif param == "gate_duration":
+                gate.update_duration(float(value))
+            elif param == "pulse":
+                gate.manual_fire()
+            elif param == "enabled":
+                gate.enabled = bool(value)
+        if node.get("type") in ("StreamSpyNode", "StreamSpyingNode", "KeywordSpyNode"):
+            spy = self.get_or_create_stream_spy(node_id)
+            if param == "keywords":
+                spy.set_keywords(value)
+                node["properties"]["keywords"] = value
+            elif param == "cooldown_seconds":
+                spy.update_settings(cooldown_seconds=float(value))
+                node["properties"]["cooldown_seconds"] = float(value)
+            elif param == "exact_match":
+                spy.update_settings(exact_match=bool(value))
+                node["properties"]["exact_match"] = bool(value)
+            elif param == "case_sensitive":
+                spy.update_settings(case_sensitive=bool(value))
+                node["properties"]["case_sensitive"] = bool(value)
+            elif param == "listen_chat":
+                spy.update_settings(listen_chat=bool(value))
+                node["properties"]["listen_chat"] = bool(value)
+            elif param == "listen_audio":
+                spy.update_settings(listen_audio=bool(value))
+                node["properties"]["listen_audio"] = bool(value)
+            elif param == "enabled":
+                spy.update_settings(enabled=bool(value))
+                node["properties"]["enabled"] = bool(value)
+            elif param in ("pulse", "test_alert"):
+                spy.manual_trigger()
 
         # Hot-reload into orchestrator
         self._apply_graph_to_orchestrator()
@@ -786,6 +893,44 @@ class GraphDAGManager:
                                         rule["unit"] = src_port["unit"]
                 continue
 
+            if ntype == "TimerTriggerNode":
+                interval_sec = float(props.get("interval_seconds", 30.0))
+                timer = self.get_or_create_timer(node_id, interval_sec)
+                timer.enabled = bool(props.get("enabled", True))
+                continue
+
+            if ntype in ("SimpleGateNode", "BasicGateNode", "TimedGateNode"):
+                interval_sec = float(props.get("interval_seconds", 30.0))
+                gate_dur = float(props.get("gate_duration", 2.0))
+                gate = self.get_or_create_simple_gate(node_id, interval_sec, gate_dur)
+                gate.enabled = bool(props.get("enabled", True))
+                continue
+
+            if ntype in ("StreamSpyNode", "StreamSpyingNode", "KeywordSpyNode"):
+                kw = props.get("keywords", "clutch, ace, leak, drama, ban, insane, jackpot")
+                cooldown_sec = float(props.get("cooldown_seconds", 10.0))
+                spy = self.get_or_create_stream_spy(node_id, kw, cooldown_sec)
+                spy.update_settings(
+                    cooldown_seconds=cooldown_sec,
+                    case_sensitive=bool(props.get("case_sensitive", False)),
+                    exact_match=bool(props.get("exact_match", False)),
+                    listen_chat=bool(props.get("listen_chat", True)),
+                    listen_audio=bool(props.get("listen_audio", True)),
+                    enabled=bool(props.get("enabled", True)),
+                )
+                session = self.get_node_source_session(node_id)
+                if session and getattr(session, "stream_spy", None):
+                    session.stream_spy.set_keywords(kw)
+                    session.stream_spy.update_settings(
+                        cooldown_seconds=cooldown_sec,
+                        case_sensitive=bool(props.get("case_sensitive", False)),
+                        exact_match=bool(props.get("exact_match", False)),
+                        listen_chat=bool(props.get("listen_chat", True)),
+                        listen_audio=bool(props.get("listen_audio", True)),
+                        enabled=bool(props.get("enabled", True)),
+                    )
+                continue
+
             session = self.get_node_source_session(node_id)
             if not session:
                 continue
@@ -828,6 +973,16 @@ class GraphDAGManager:
                     trigs_list = [l.strip() for l in raw_trigs.split(",") if l.strip()] if isinstance(raw_trigs, str) else raw_trigs
                     session.cv_service.set_trigger_labels(trigs_list)
 
+            elif ntype == "GeoEstimationNode" and getattr(session, "geo_service", None):
+                if "interval_seconds" in props:
+                    session.geo_service.interval_seconds = float(props["interval_seconds"])
+                if "confidence_threshold" in props:
+                    session.geo_service.confidence_threshold = float(props["confidence_threshold"])
+                if "enabled" in props:
+                    session.geo_service.enabled = bool(props["enabled"])
+                if "roi" in props and isinstance(props["roi"], dict):
+                    session.geo_service.roi = props["roi"]
+
             elif ntype == "VideoCropNode":
                 crop_roi = props.get("roi") or {
                     "x": float(props.get("x", 0.02)),
@@ -858,6 +1013,8 @@ class GraphDAGManager:
                                     session.streamer_emotion.update_roi(0.0, 0.0, 1.0, 1.0)
                                 elif f_node and f_node.get("type") == "OCRVisionNode" and getattr(session, "dynamic_ocr", None):
                                     session.dynamic_ocr.set_areas([{"id": "cropped_ocr", **crop_roi}])
+                                elif f_node and f_node.get("type") == "GeoEstimationNode" and getattr(session, "geo_service", None):
+                                    session.geo_service.roi = crop_roi
                         elif t_type == "FacecamEmotionNode" and getattr(session, "streamer_emotion", None):
                             session.streamer_emotion_uses_scaler = False
                             session.streamer_emotion.update_roi(
@@ -866,6 +1023,8 @@ class GraphDAGManager:
                             )
                         elif t_type == "OCRVisionNode" and getattr(session, "dynamic_ocr", None):
                             session.dynamic_ocr.set_areas([{"id": "cropped_ocr", **crop_roi}])
+                        elif t_type == "GeoEstimationNode" and getattr(session, "geo_service", None):
+                            session.geo_service.roi = crop_roi
 
             elif ntype == "ImageScaleNode" and getattr(session, "image_scaler", None):
                 scale_factor = props.get("scale_factor", 2.0)
@@ -955,8 +1114,6 @@ class GraphDAGManager:
     def get_node_telemetry_payload(self) -> Dict[str, dict]:
         """Generates real-time telemetry metrics keyed by node ID for in-node widgets."""
         payload: Dict[str, dict] = {}
-        if not self.orchestrator:
-            return payload
 
         for n in self.nodes.values():
             node_id = n["id"]
@@ -1023,6 +1180,100 @@ class GraphDAGManager:
                         }
                         for c in folder_clips[:6]
                     ],
+                }
+                continue
+
+            # Timer Trigger & Periodic Clock Pulse Node
+            if node_type == "TimerTriggerNode":
+                props = n.get("properties", {})
+                interval_sec = float(props.get("interval_seconds", 30.0))
+                timer = self.get_or_create_timer(node_id, interval_sec)
+                timer.enabled = bool(props.get("enabled", True))
+                timer.check_trigger()
+                telemetry = timer.get_telemetry()
+                session = self.get_node_source_session(node_id)
+                payload[node_id] = {
+                    "interval_seconds": telemetry.get("interval_seconds", interval_sec),
+                    "countdown": telemetry.get("countdown", interval_sec),
+                    "progress": telemetry.get("progress", 0.0),
+                    "is_firing": telemetry.get("is_firing", False),
+                    "trigger_count": telemetry.get("trigger_count", 0),
+                    "enabled": telemetry.get("enabled", True),
+                    "status": telemetry.get("status", "running"),
+                    "source_channel": session.channel if session else "auto",
+                }
+                continue
+
+            # Simple Timed Stream Gate Node
+            if node_type in ("SimpleGateNode", "BasicGateNode", "TimedGateNode"):
+                props = n.get("properties", {})
+                interval_sec = float(props.get("interval_seconds", 30.0))
+                gate_dur = float(props.get("gate_duration", 2.0))
+                gate = self.get_or_create_simple_gate(node_id, interval_sec, gate_dur)
+                gate.enabled = bool(props.get("enabled", True))
+                gate.check_trigger()
+                telemetry = gate.get_telemetry()
+                session = self.get_node_source_session(node_id)
+
+                incoming_pins = {
+                    w.get("to", "").split(":")[-1] for w in self.wires
+                    if w.get("to", "").startswith(f"{node_id}:")
+                }
+                payload[node_id] = {
+                    "interval_seconds": telemetry.get("interval_seconds", interval_sec),
+                    "gate_duration": telemetry.get("gate_duration", gate_dur),
+                    "countdown": telemetry.get("countdown", interval_sec),
+                    "progress": telemetry.get("progress", 0.0),
+                    "is_open": telemetry.get("is_open", False),
+                    "is_firing": telemetry.get("is_firing", False),
+                    "fire_count": telemetry.get("fire_count", 0),
+                    "enabled": telemetry.get("enabled", True),
+                    "status": telemetry.get("status", "armed"),
+                    "has_video": "video_in" in incoming_pins,
+                    "has_audio": "audio_in" in incoming_pins,
+                    "has_chat": "chat_in" in incoming_pins,
+                    "stream_frame_b64": getattr(session, "extra_telemetry", {}).get("stream_frame_b64", "") if session else "",
+                    "source_channel": session.channel if session else "auto",
+                }
+                continue
+
+            # Stream Spying Keyword Surveillance Node
+            if node_type in ("StreamSpyNode", "StreamSpyingNode", "KeywordSpyNode"):
+                props = n.get("properties", {})
+                kw = props.get("keywords", "clutch, ace, leak, drama, ban, insane, jackpot")
+                cooldown_sec = float(props.get("cooldown_seconds", 10.0))
+                spy = self.get_or_create_stream_spy(node_id, kw, cooldown_sec)
+                spy.update_settings(
+                    cooldown_seconds=cooldown_sec,
+                    case_sensitive=bool(props.get("case_sensitive", False)),
+                    exact_match=bool(props.get("exact_match", False)),
+                    listen_chat=bool(props.get("listen_chat", True)),
+                    listen_audio=bool(props.get("listen_audio", True)),
+                    enabled=bool(props.get("enabled", True)),
+                )
+                session = self.get_node_source_session(node_id)
+                # Check recent chat messages from session if active
+                if session and getattr(session, "chat_engine", None) and spy.listen_chat and spy.enabled:
+                    recent = getattr(session.chat_engine, "recent_messages", [])
+                    if recent:
+                        last_m = recent[-1]
+                        m_id = last_m.get("id") or last_m.get("time")
+                        if not hasattr(spy, "_last_processed_chat_id") or spy._last_processed_chat_id != m_id:
+                            spy._last_processed_chat_id = m_id
+                            spy.process_chat_message(last_m)
+
+                telemetry = spy.get_telemetry()
+                incoming_pins = {
+                    w.get("to", "").split(":")[-1] for w in self.wires
+                    if w.get("to", "").startswith(f"{node_id}:")
+                }
+                payload[node_id] = {
+                    **telemetry,
+                    "has_chat": "chat_in" in incoming_pins,
+                    "has_audio": "audio_in" in incoming_pins,
+                    "has_text": "text_in" in incoming_pins,
+                    "stream_frame_b64": getattr(session, "extra_telemetry", {}).get("stream_frame_b64", "") if session else "",
+                    "source_channel": session.channel if session else "auto",
                 }
                 continue
 
@@ -1114,6 +1365,36 @@ class GraphDAGManager:
                     "engine": getattr(session.cv_service.engine, "engine_name", "coreml") if getattr(session, "cv_service", None) else "coreml",
                     "source_channel": session.channel,
                 }
+            elif node_type == "GeoEstimationNode":
+                geo_res = getattr(session.geo_service, "latest_result", {}) if getattr(session, "geo_service", None) else {}
+                lat = float(extra.get("geo_lat", geo_res.get("lat", 0.0)))
+                lng = float(extra.get("geo_lng", geo_res.get("lng", 0.0)))
+                confidence = float(extra.get("geo_confidence", geo_res.get("confidence", 0.0)))
+                country = extra.get("geo_country", geo_res.get("country", "Worldwide"))
+                country_code = extra.get("geo_country_code", geo_res.get("country_code", "—"))
+                flag = extra.get("geo_flag", geo_res.get("flag", "🌍"))
+                location_name = extra.get("geo_location_name", geo_res.get("location_name", "Worldwide"))
+                latency_ms = float(extra.get("geo_latency_ms", geo_res.get("latency_ms", 0.0)))
+                status = extra.get("geo_status", geo_res.get("status", "standby"))
+                geo_trigger = bool(extra.get("geo_trigger", geo_res.get("geo_trigger", False)))
+                osm_url = extra.get("geo_osm_url", geo_res.get("osm_url", f"https://www.openstreetmap.org/?mlat={lat:.4f}&mlon={lng:.4f}#map=10/{lat:.4f}/{lng:.4f}"))
+                payload[node_id] = {
+                    "lat": lat,
+                    "lng": lng,
+                    "confidence": confidence,
+                    "country": country,
+                    "country_code": country_code,
+                    "flag": flag,
+                    "location_name": location_name,
+                    "latency_ms": latency_ms,
+                    "status": status,
+                    "geo_trigger": geo_trigger,
+                    "osm_url": osm_url,
+                    "interval_seconds": float(props.get("interval_seconds", getattr(session.geo_service, "interval_seconds", 30.0) if getattr(session, "geo_service", None) else 30.0)),
+                    "confidence_threshold": float(props.get("confidence_threshold", getattr(session.geo_service, "confidence_threshold", 50.0) if getattr(session, "geo_service", None) else 50.0)),
+                    "stream_frame_b64": extra.get("stream_frame_b64", ""),
+                    "source_channel": session.channel,
+                }
             elif node_type == "FacecamEmotionNode":
                 face_b64 = extra.get("emotion_thumbnail_b64") or extra.get("stream_frame_b64", "")
                 emotions = extra.get("emotion_distribution", {})
@@ -1166,8 +1447,16 @@ class GraphDAGManager:
                     "source_channel": session.channel,
                 }
             elif node_type == "GateEvaluatorNode":
-                debounce_sec = getattr(session.gate_evaluator, "debounce_seconds", 30.0) if session.gate_evaluator else 30.0
-                last_trig = getattr(session.gate_evaluator, "last_trigger_time", 0.0) if session.gate_evaluator else 0.0
+                raw_debounce = getattr(session.gate_evaluator, "debounce_seconds", 30.0) if session.gate_evaluator else 30.0
+                raw_last_trig = getattr(session.gate_evaluator, "last_trigger_time", 0.0) if session.gate_evaluator else 0.0
+                try:
+                    debounce_sec = float(raw_debounce)
+                except (TypeError, ValueError):
+                    debounce_sec = 30.0
+                try:
+                    last_trig = float(raw_last_trig)
+                except (TypeError, ValueError):
+                    last_trig = 0.0
                 is_debouncing = (time.time() - last_trig < debounce_sec) if last_trig > 0 else False
                 debounce_remaining = max(0.0, (last_trig + debounce_sec) - time.time()) if is_debouncing else 0.0
                 payload[node_id] = {
@@ -1237,7 +1526,7 @@ class GraphDAGManager:
                             current_val = 0.0
                     elif up_port in ("net_pnl", "winrate", "rtp"):
                         current_val = float(up_payload.get(up_port, 0.0))
-                    elif up_port in ("valence", "arousal", "tilt_score", "euphoria_score", "happy", "angry", "surprise", "sad", "fear", "disgust", "neutral", "contempt", "confidence"):
+                    elif up_port in ("valence", "arousal", "tilt_score", "euphoria_score", "happy", "angry", "surprise", "sad", "fear", "disgust", "neutral", "contempt", "confidence", "lat", "lng"):
                         current_val = float(up_payload.get(up_port, 0.0))
                     elif up_payload.get("emotions") and up_port in up_payload["emotions"]:
                         current_val = float(up_payload["emotions"][up_port])
